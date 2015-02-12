@@ -3,17 +3,50 @@
 assemblyJarName <- "sparkr-assembly-0.1.jar"
 
 sparkR.onLoad <- function(libname, pkgname) {
-  assemblyJarPath <- paste(libname, "/SparkR/", assemblyJarName, sep="")
-  assemblyJarPath <- gsub(" ", "\\ ", assemblyJarPath, fixed=T)
+  assemblyJarPath <- paste(libname, "/SparkR/", assemblyJarName, sep = "")
+  assemblyJarPath <- gsub(" ", "\\ ", assemblyJarPath, fixed = T)
   packageStartupMessage("[SparkR] Initializing with classpath ", assemblyJarPath, "\n")
-
-  sparkMem <- Sys.getenv("SPARK_MEM", "512m")
-  yarn_conf_dir <- Sys.getenv("YARN_CONF_DIR", "")
-  
+ 
   .sparkREnv$libname <- libname
   .sparkREnv$assemblyJarPath <- assemblyJarPath
-  .jinit(classpath=assemblyJarPath, parameters=paste("-Xmx", sparkMem, sep=""))
-  .jaddClassPath(yarn_conf_dir)
+}
+
+# Utility function that returns TRUE if we have an active connection to the
+# backend and FALSE otherwise
+connExists <- function(env) {
+  tryCatch({
+    exists(".sparkRCon", envir = env) && isOpen(env[[".sparkRCon"]])
+  }, error = function(err) {
+    return(FALSE)
+  })
+}
+
+# Stop the Spark context.
+# Also terminates the backend this R session is connected to
+sparkR.stop <- function(env) {
+  cat("Stopping SparkR\n")
+
+  if (!connExists(env)) {
+    # When the workspace is saved in R, the connections are closed
+    # *before* the finalizer is run. In these cases, we reconnect
+    # to the backend, so we can shut it down.
+    connectBackend("localhost", .sparkREnv$sparkRBackendPort)
+  }
+
+  if (exists(".sparkRjsc", envir = env)) {
+    sc <- get(".sparkRjsc", envir = env)
+    callJMethod(sc, "stop")
+  }
+
+  callJStatic("SparkRHandler", "stopBackend")
+  # Also close the connection and remove it from our env
+  conn <- get(".sparkRCon", env)
+  close(conn)
+  rm(".sparkRCon", envir = env)
+
+  # Finally, sleep for 1 sec to let backend finish exiting.
+  # Without this we get port conflicts in RStudio when we try to 'Restart R'.
+  Sys.sleep(1)
 }
 
 #' Initialize a new Spark Context.
@@ -26,6 +59,8 @@ sparkR.onLoad <- function(libname, pkgname) {
 #' @param sparkEnvir Named list of environment variables to set on worker nodes.
 #' @param sparkExecutorEnv Named list of environment variables to be used when launching executors.
 #' @param sparkJars Character string vector of jar files to pass to the worker nodes.
+#' @param sparkRLibDir The path where R is installed on the worker nodes.
+#' @param sparkRBackendPort The port to use for SparkR JVM Backend.
 #' @export
 #' @examples
 #'\dontrun{
@@ -34,7 +69,7 @@ sparkR.onLoad <- function(libname, pkgname) {
 #'                  list(spark.executor.memory="1g"))
 #' sc <- sparkR.init("yarn-client", "SparkR", "/home/spark",
 #'                  list(spark.executor.memory="1g"),
-#'                  list(LD_LIBRARY_PATH="/directory of Java VM Library Files (libjvm.so) on worker nodes/"),
+#'                  list(LD_LIBRARY_PATH="/directory of JVM libraries (libjvm.so) on workers/"),
 #'                  c("jarfile1.jar","jarfile2.jar"))
 #'}
 
@@ -45,12 +80,30 @@ sparkR.init <- function(
   sparkEnvir = list(),
   sparkExecutorEnv = list(),
   sparkJars = "",
-  sparkRLibDir = "") {
+  sparkRLibDir = "",
+  sparkRBackendPort = 12345) {
 
-  if (exists(".sparkRjsc", envir=.sparkREnv)) {
+  if (exists(".sparkRjsc", envir = .sparkREnv)) {
     cat("Re-using existing Spark Context. Please restart R to create a new Spark Context\n")
-    return(get(".sparkRjsc", envir=.sparkREnv))
+    return(get(".sparkRjsc", envir = .sparkREnv))
   }
+
+  sparkMem <- Sys.getenv("SPARK_MEM", "512m")
+  jars <- c(as.character(.sparkREnv$assemblyJarPath), as.character(sparkJars))
+
+  cp <- paste0(jars, collapse = ":")
+
+  yarn_conf_dir <- Sys.getenv("YARN_CONF_DIR", "")
+  if (yarn_conf_dir != "") {
+    cp <- paste(cp, yarn_conf_dir, sep = ":")
+  }
+  launchBackend(classPath = cp,
+                mainClass = "edu.berkeley.cs.amplab.sparkr.SparkRBackend",
+                args = as.character(sparkRBackendPort),
+                javaOpts = paste("-Xmx", sparkMem, sep = ""))
+  Sys.sleep(2) # Wait for backend to come up
+  .sparkREnv$sparkRBackendPort <- sparkRBackendPort
+  connectBackend("localhost", sparkRBackendPort) # Connect to it
 
   if (nchar(sparkHome) != 0) {
     sparkHome <- normalizePath(sparkHome)
@@ -60,37 +113,40 @@ sparkR.init <- function(
     .sparkREnv$libname <- sparkRLibDir
   }
 
-  sparkEnvirMap <- .jnew("java/util/HashMap")
+  sparkEnvirMap <- new.env()
   for (varname in names(sparkEnvir)) {
-    sparkEnvirMap$put(varname, sparkEnvir[[varname]])
+    sparkEnvirMap[[varname]] <- sparkEnvir[[varname]]
   }
   
-  sparkExecutorEnvMap <- .jnew("java/util/HashMap")
+  sparkExecutorEnvMap <- new.env()
   if (!any(names(sparkExecutorEnv) == "LD_LIBRARY_PATH")) {
-    sparkExecutorEnvMap$put("LD_LIBRARY_PATH", paste0("$LD_LIBRARY_PATH:",Sys.getenv("LD_LIBRARY_PATH")))
+    sparkExecutorEnvMap[["LD_LIBRARY_PATH"]] <- paste0("$LD_LIBRARY_PATH:",Sys.getenv("LD_LIBRARY_PATH"))
   }
   for (varname in names(sparkExecutorEnv)) {
-    sparkExecutorEnvMap$put(varname, sparkExecutorEnv[[varname]])
+    sparkExecutorEnvMap[[varname]] <- sparkExecutorEnv[[varname]]
   }
-  
-  .jaddClassPath(sparkJars)
-  jars <- c(as.character(.sparkREnv$assemblyJarPath), as.character(sparkJars))
 
   nonEmptyJars <- Filter(function(x) { x != "" }, jars)
-  localJarPaths <- sapply(nonEmptyJars, function(j) { paste("file://", j, sep="") })
+  localJarPaths <- sapply(nonEmptyJars, function(j) { paste("file://", j, sep = "") })
 
   assign(
     ".sparkRjsc",
-    J("edu.berkeley.cs.amplab.sparkr.RRDD",
+    callJStatic(
+      "edu.berkeley.cs.amplab.sparkr.RRDD",
       "createSparkContext",
       master,
       appName,
       as.character(sparkHome),
-      .jarray(localJarPaths, "java/lang/String"),
+      as.list(localJarPaths),
       sparkEnvirMap,
       sparkExecutorEnvMap),
-    envir=.sparkREnv
+    envir = .sparkREnv
   )
 
-  get(".sparkRjsc", envir=.sparkREnv)
+  sc <- get(".sparkRjsc", envir = .sparkREnv)
+
+  # Register a finalizer to stop backend on R exit
+  reg.finalizer(.sparkREnv, sparkR.stop, onexit = TRUE)
+
+  sc
 }

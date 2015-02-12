@@ -1,6 +1,6 @@
 # RDD in R implemented in S4 OO system.
 
-#setOldClass("jobjRef")
+setOldClass("jobj")
 
 #' @title S4 class that represents an RDD
 #' @description RDD can be created using functions like
@@ -8,17 +8,17 @@
 #' @rdname RDD
 #' @seealso parallelize, textFile
 #'
-#' @param env An R environment that stores bookkeeping states of the RDD
-#' @param jrdd Java object reference to the backing JavaRDD
+#' @slot env An R environment that stores bookkeeping states of the RDD
+#' @slot jrdd Java object reference to the backing JavaRDD
 #' @export
 setClass("RDD",
          slots = list(env = "environment",
-                      jrdd = "jobjRef"))
+                      jrdd = "jobj"))
 
 setClass("PipelinedRDD",
          slots = list(prev = "RDD",
                       func = "function",
-                      prev_jrdd = "jobjRef"),
+                      prev_jrdd = "jobj"),
          contains = "RDD")
 
 
@@ -46,7 +46,11 @@ setMethod("initialize", "PipelinedRDD", function(.Object, prev, func, jrdd_val) 
   .Object@env$isCached <- FALSE
   .Object@env$isCheckpointed <- FALSE
   .Object@env$jrdd_val <- jrdd_val
+   # This tracks if jrdd_val is serialized
   .Object@env$serialized <- prev@env$serialized
+
+  # NOTE: We use prev_serialized to track if prev_jrdd is serialized
+  # prev_serialized is used during the delayed computation of JRDD in getJRDD
   .Object@prev <- prev
 
   isPipelinable <- function(rdd) {
@@ -58,12 +62,17 @@ setMethod("initialize", "PipelinedRDD", function(.Object, prev, func, jrdd_val) 
     # This transformation is the first in its stage:
     .Object@func <- func
     .Object@prev_jrdd <- getJRDD(prev)
+    # Since this is the first step in the pipeline, the prev_serialized
+    # is same as serialized here.
+    .Object@env$prev_serialized <- .Object@env$serialized
   } else {
     pipelinedFunc <- function(split, iterator) {
       func(split, prev@func(split, iterator))
     }
     .Object@func <- pipelinedFunc
     .Object@prev_jrdd <- prev@prev_jrdd # maintain the pipeline
+    # Get if the prev_jrdd was serialized from the parent RDD
+    .Object@env$prev_serialized <- prev@env$prev_serialized
   }
 
   .Object
@@ -72,23 +81,26 @@ setMethod("initialize", "PipelinedRDD", function(.Object, prev, func, jrdd_val) 
 
 #' @rdname RDD
 #' @export
+#'
+#' @param jrdd Java object reference to the backing JavaRDD
+#' @param serialized TRUE if the RDD stores data serialized in R
+#' @param isCached TRUE if the RDD is cached
+#' @param isCheckpointed TRUE if the RDD has been checkpointed
 RDD <- function(jrdd, serialized = TRUE, isCached = FALSE,
                 isCheckpointed = FALSE) {
   new("RDD", jrdd, serialized, isCached, isCheckpointed)
 }
 
-#' @rdname PipelinedRDD
-#' @export
 PipelinedRDD <- function(prev, func) {
   new("PipelinedRDD", prev, func, NULL)
 }
 
 
 # The jrdd accessor function.
-setGeneric("getJRDD", function(rdd) { standardGeneric("getJRDD") })
+setGeneric("getJRDD", function(rdd, ...) { standardGeneric("getJRDD") })
 setMethod("getJRDD", signature(rdd = "RDD"), function(rdd) rdd@jrdd )
 setMethod("getJRDD", signature(rdd = "PipelinedRDD"),
-          function(rdd) {
+          function(rdd, dataSerialization = TRUE) {
             if (!is.null(rdd@env$jrdd_val)) {
               return(rdd@env$jrdd_val)
             }
@@ -98,36 +110,44 @@ setMethod("getJRDD", signature(rdd = "PipelinedRDD"),
             computeFunc <- function(split, part) {
               rdd@func(split, part)
             }
-            serializedFunc <- serialize("computeFunc", connection = NULL,
-                                        ascii = TRUE)
-            serializedFuncArr <- .jarray(serializedFunc)
+            serializedFuncArr <- serialize("computeFunc", connection = NULL,
+                                           ascii = TRUE)
 
-            packageNamesArr <- .jarray(serialize(.sparkREnv[[".packages"]],
-                                                 connection = NULL,
-                                                 ascii = TRUE))
+            packageNamesArr <- serialize(.sparkREnv[[".packages"]],
+                                         connection = NULL,
+                                         ascii = TRUE)
 
-            refs <- lapply(ls(.broadcastNames),
-                           function(name) { get(name, .broadcastNames) })
-            broadcastArr <- .jarray(refs,
-                                    "org/apache/spark/broadcast/Broadcast")
+            broadcastArr <- lapply(ls(.broadcastNames),
+                                   function(name) { get(name, .broadcastNames) })
 
             depsBin <- getDependencies(computeFunc)
-            depsBinArr <- .jarray(depsBin)
 
             prev_jrdd <- rdd@prev_jrdd
 
-            rddRef <- new(J("edu.berkeley.cs.amplab.sparkr.RRDD"),
-                           prev_jrdd$rdd(),
-                           serializedFuncArr,
-                           rdd@env$serialized,
-                           depsBinArr,
-                           packageNamesArr,
-                           as.character(.sparkREnv[["libname"]]),
-                           broadcastArr,
-                           prev_jrdd$classTag())
-            # The RDD is serialized after we create a RRDD
-            rdd@env$serialized <- TRUE
-            rdd@env$jrdd_val <- rddRef$asJavaRDD()
+            if (dataSerialization) {
+              rddRef <- newJObject("edu.berkeley.cs.amplab.sparkr.RRDD",
+                                   callJMethod(prev_jrdd, "rdd"),
+                                   serializedFuncArr,
+                                   rdd@env$prev_serialized,
+                                   depsBin,
+                                   packageNamesArr,
+                                   as.character(.sparkREnv[["libname"]]),
+                                   broadcastArr,
+                                   callJMethod(prev_jrdd, "classTag"))
+            } else {
+              rddRef <- newJObject("edu.berkeley.cs.amplab.sparkr.StringRRDD",
+                                   callJMethod(prev_jrdd, "rdd"),
+                                   serializedFuncArr,
+                                   rdd@env$prev_serialized,
+                                   depsBin,
+                                   packageNamesArr,
+                                   as.character(.sparkREnv[["libname"]]),
+                                   broadcastArr,
+                                   callJMethod(prev_jrdd, "classTag"))
+            }
+            # Save the serialization flag after we create a RRDD
+            rdd@env$serialized <- dataSerialization
+            rdd@env$jrdd_val <- callJMethod(rddRef, "asJavaRDD") # rddRef$asJavaRDD()
             rdd@env$jrdd_val
           })
 
@@ -135,8 +155,8 @@ setMethod("getJRDD", signature(rdd = "PipelinedRDD"),
 setValidity("RDD",
             function(object) {
               jrdd <- getJRDD(object)
-              cls <- jrdd$getClass()
-              className <- cls$getName()
+              cls <- callJMethod(jrdd, "getClass")
+              className <- callJMethod(cls, "getName")
               if (grep("spark.api.java.*RDD*", className) == 1) {
                 TRUE
               } else {
@@ -168,11 +188,62 @@ setGeneric("cache", function(rdd) { standardGeneric("cache") })
 setMethod("cache",
           signature(rdd = "RDD"),
           function(rdd) {
-            .jcall(getJRDD(rdd), "Lorg/apache/spark/api/java/JavaRDD;", "cache")
+            callJMethod(getJRDD(rdd), "cache")
             rdd@env$isCached <- TRUE
             rdd
           })
 
+#' Persist an RDD
+#'
+#' Persist this RDD with the specified storage level. For details of the
+#' supported storage levels, refer to
+#' http://spark.apache.org/docs/latest/programming-guide.html#rdd-persistence.
+#'
+#' @param rdd The RDD to persist
+#' @param newLevel The new storage level to be assigned
+#' @rdname persist
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, 1:10, 2L)
+#' persist(rdd, "MEMORY_AND_DISK")
+#'}
+setGeneric("persist", function(rdd, newLevel) { standardGeneric("persist") })
+
+#' @rdname persist
+#' @aliases persist,RDD-method
+setMethod("persist",
+          signature(rdd = "RDD", newLevel = "character"),
+          function(rdd, newLevel = c("DISK_ONLY",
+                                     "DISK_ONLY_2",
+                                     "MEMORY_AND_DISK",
+                                     "MEMORY_AND_DISK_2",
+                                     "MEMORY_AND_DISK_SER",
+                                     "MEMORY_AND_DISK_SER_2",
+                                     "MEMORY_ONLY",
+                                     "MEMORY_ONLY_2",
+                                     "MEMORY_ONLY_SER",
+                                     "MEMORY_ONLY_SER_2",
+                                     "OFF_HEAP")) {
+            match.arg(newLevel)
+            storageLevel <- switch(newLevel,
+              "DISK_ONLY" = callJStatic("org.apache.spark.storage.StorageLevel", "DISK_ONLY"),
+              "DISK_ONLY_2" = callJStatic("org.apache.spark.storage.StorageLevel", "DISK_ONLY_2"),
+              "MEMORY_AND_DISK" = callJStatic("org.apache.spark.storage.StorageLevel", "MEMORY_AND_DISK"),
+              "MEMORY_AND_DISK_2" = callJStatic("org.apache.spark.storage.StorageLevel", "MEMORY_AND_DISK_2"),
+              "MEMORY_AND_DISK_SER" = callJStatic("org.apache.spark.storage.StorageLevel", "MEMORY_AND_DISK_SER"),
+              "MEMORY_AND_DISK_SER_2" = callJStatic("org.apache.spark.storage.StorageLevel", "MEMORY_AND_DISK_SER_2"),
+              "MEMORY_ONLY" = callJStatic("org.apache.spark.storage.StorageLevel", "MEMORY_ONLY"),
+              "MEMORY_ONLY_2" = callJStatic("org.apache.spark.storage.StorageLevel", "MEMORY_ONLY_2"),
+              "MEMORY_ONLY_SER" = callJStatic("org.apache.spark.storage.StorageLevel", "MEMORY_ONLY_SER"),
+              "MEMORY_ONLY_SER_2" = callJStatic("org.apache.spark.storage.StorageLevel", "MEMORY_ONLY_SER_2"),
+              "OFF_HEAP" = callJStatic("org.apache.spark.storage.StorageLevel", "OFF_HEAP"))
+            
+            callJMethod(getJRDD(rdd), "persist", storageLevel)
+            rdd@env$isCached <- TRUE
+            rdd
+          })
 
 #' Unpersist an RDD
 #'
@@ -196,8 +267,7 @@ setGeneric("unpersist", function(rdd) { standardGeneric("unpersist") })
 setMethod("unpersist",
           signature(rdd = "RDD"),
           function(rdd) {
-            .jcall(getJRDD(rdd), "Lorg/apache/spark/api/java/JavaRDD;",
-                   "unpersist")
+            callJMethod(getJRDD(rdd), "unpersist")
             rdd@env$isCached <- FALSE
             rdd
           })
@@ -229,7 +299,7 @@ setMethod("checkpoint",
           signature(rdd = "RDD"),
           function(rdd) {
             jrdd <- getJRDD(rdd)
-            .jcall(jrdd$rdd(), "V", "checkpoint")
+            callJMethod(jrdd, "checkpoint")
             rdd@env$isCheckpointed <- TRUE
             rdd
           })
@@ -244,7 +314,7 @@ setMethod("checkpoint",
 #'\dontrun{
 #' sc <- sparkR.init()
 #' rdd <- parallelize(sc, 1:10, 2L)
-#' numParititions(rdd)  # 2L
+#' numPartitions(rdd)  # 2L
 #'}
 setGeneric("numPartitions", function(rdd) { standardGeneric("numPartitions") })
 
@@ -254,8 +324,8 @@ setMethod("numPartitions",
           signature(rdd = "RDD"),
           function(rdd) {
             jrdd <- getJRDD(rdd)
-            partitions <- .jcall(jrdd, "Ljava/util/List;", "splits")
-            .jcall(partitions, "I", "size")
+            partitions <- callJMethod(jrdd, "splits")
+            callJMethod(partitions, "size")
           })
 
 #' Collect elements of an RDD
@@ -284,7 +354,7 @@ setMethod("collect",
           signature(rdd = "RDD"),
           function(rdd, flatten = TRUE) {
             # Assumes a pairwise RDD is backed by a JavaPairRDD.
-            collected <- .jcall(getJRDD(rdd), "Ljava/util/List;", "collect")
+            collected <- callJMethod(getJRDD(rdd), "collect")
             convertJListToRList(collected, flatten)
           })
 
@@ -304,10 +374,9 @@ setGeneric("collectPartition",
 setMethod("collectPartition",
           signature(rdd = "RDD", partitionId = "integer"),
           function(rdd, partitionId) {
-            jPartitionsList <- .jcall(getJRDD(rdd),
-                                      "[Ljava/util/List;",
-                                      "collectPartitions",
-                                      .jarray(as.integer(partitionId)))
+            jPartitionsList <- callJMethod(getJRDD(rdd),
+                                           "collectPartitions",
+                                           as.list(as.integer(partitionId)))
 
             jList <- jPartitionsList[[1]]
             convertJListToRList(jList, flatten = TRUE)
@@ -348,7 +417,7 @@ setMethod("lookup",
 
 #' Return the number of elements in the RDD.
 #'
-#' @param rdd The RDD to count
+#' @param x The RDD to count
 #' @return number of elements in the RDD.
 #' @rdname count
 #' @export
@@ -359,17 +428,17 @@ setMethod("lookup",
 #' count(rdd) # 10
 #' length(rdd) # Same as count
 #'}
-setGeneric("count", function(rdd) { standardGeneric("count") })
+setGeneric("count", function(x) { standardGeneric("count") })
 
 #' @rdname count
 #' @aliases count,RDD-method
 setMethod("count",
-          signature(rdd = "RDD"),
-          function(rdd) {
+          signature(x = "RDD"),
+          function(x) {
             countPartition <- function(part) {
               as.integer(length(part))
             }
-            valsRDD <- lapplyPartition(rdd, countPartition)
+            valsRDD <- lapplyPartition(x, countPartition)
             vals <- collect(valsRDD)
             sum(as.integer(vals))
           })
@@ -445,6 +514,7 @@ setMethod("countByKey",
 #' @param FUN the transformation to apply on each element
 #' @return a new RDD created by the transformation.
 #' @rdname lapply
+#' @aliases lapply
 #' @export
 #' @examples
 #'\dontrun{
@@ -600,8 +670,8 @@ setMethod("mapPartitionsWithIndex",
 #' a predicate (i.e. returning TRUE in a given logical function).
 #' The same as `filter()' in Spark.
 #'
-#' @param rdd The RDD to be filtered.
-#' @param filterFunc A unary predicate function.
+#' @param x The RDD to be filtered.
+#' @param f A unary predicate function.
 #' @rdname filterRDD
 #' @export
 #' @examples
@@ -611,21 +681,22 @@ setMethod("mapPartitionsWithIndex",
 #' unlist(collect(filterRDD(rdd, function (x) { x < 3 }))) # c(1, 2)
 #'}
 setGeneric("filterRDD", 
-           function(rdd, filterFunc) { standardGeneric("filterRDD") })
+           function(x, f) { standardGeneric("filterRDD") })
 
 #' @rdname filterRDD
 #' @aliases filterRDD,RDD,function-method
 setMethod("filterRDD",
-          signature(rdd = "RDD", filterFunc = "function"),
-          function(rdd, filterFunc) {
+          signature(x = "RDD", f = "function"),
+          function(x, f) {
             filter.func <- function(part) {
-              Filter(filterFunc, part)
+              Filter(f, part)
             }
-            lapplyPartition(rdd, filter.func)
+            lapplyPartition(x, filter.func)
           })
 
 #' @rdname filterRDD
-#' @aliases Filter,function,RDD-method
+#' @export
+#' @aliases Filter
 setMethod("Filter",
           signature(f = "function", x = "RDD"),
           function(f, x) {
@@ -661,7 +732,7 @@ setMethod("reduce",
             }
 
             partitionList <- collect(lapplyPartition(rdd, reducePartition),
-                                     flatten=FALSE)
+                                     flatten = FALSE)
             Reduce(func, partitionList)
           })
 
@@ -707,6 +778,54 @@ setMethod("minimum",
             reduce(rdd, min)
           })
 
+#' Applies a function to all elements in an RDD, and force evaluation.
+#'
+#' @param rdd The RDD to apply the function
+#' @param func The function to be applied.
+#' @return invisible NULL.
+#' @export
+#' @rdname foreach
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, 1:10)
+#' foreach(rdd, function(x) { save(x, file=...) })
+#'}
+setGeneric("foreach", function(rdd, func) { standardGeneric("foreach") })
+
+#' @rdname foreach
+#' @aliases foreach,RDD,function-method
+setMethod("foreach",
+          signature(rdd = "RDD", func = "function"),
+          function(rdd, func) {
+            partition.func <- function(x) {
+              lapply(x, func)
+              NULL
+            }
+            invisible(collect(mapPartitions(rdd, partition.func)))
+          })
+
+#' Applies a function to each partition in an RDD, and force evaluation.
+#'
+#' @export
+#' @rdname foreach
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, 1:10)
+#' foreachPartition(rdd, function(part) { save(part, file=...); NULL })
+#'}
+setGeneric("foreachPartition", 
+           function(rdd, func) { standardGeneric("foreachPartition") })
+
+#' @rdname foreach
+#' @aliases foreachPartition,RDD,function-method
+setMethod("foreachPartition",
+          signature(rdd = "RDD", func = "function"),
+          function(rdd, func) {
+            invisible(collect(mapPartitions(rdd, func)))
+          })
+
 #' Take elements from an RDD.
 #'
 #' This function takes the first NUM elements in the RDD and
@@ -743,10 +862,7 @@ setMethod("take",
                 break
 
               # a JList of byte arrays
-              partitionArr <- .jcall(jrdd,
-                                     "[Ljava/util/List;",
-                                     "collectPartitions",
-                                     .jarray(as.integer(index)))
+              partitionArr <- callJMethod(jrdd, "collectPartitions", as.list(as.integer(index)))
               partition <- partitionArr[[1]]
 
               size <- num - length(resList)
@@ -934,6 +1050,88 @@ setMethod("takeSample", signature(rdd = "RDD", withReplacement = "logical",
             sample(samples)[1:total]
           })
 
+#' Creates tuples of the elements in this RDD by applying a function.
+#'
+#' @param rdd The RDD.
+#' @param func The function to be applied.
+#' @rdname keyBy
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, list(1, 2, 3))
+#' collect(keyBy(rdd, function(x) { x*x })) # list(list(1, 1), list(4, 2), list(9, 3))
+#'}
+setGeneric("keyBy", function(rdd, func) { standardGeneric("keyBy") })
+
+#' @rdname keyBy
+#' @aliases keyBy,RDD
+setMethod("keyBy",
+          signature(rdd = "RDD", func = "function"),
+          function(rdd, func) {
+            apply.func <- function(x) {
+              list(func(x), x)
+            }
+            lapply(rdd, apply.func)
+          })
+
+#' Save this RDD as a SequenceFile of serialized objects.
+#'
+#' @param rdd The RDD to save
+#' @param path The directory where the file is saved
+#' @rdname saveAsObjectFile
+#' @seealso objectFile
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, 1:3)
+#' saveAsObjectFile(rdd, "/tmp/sparkR-tmp")
+#'}
+setGeneric("saveAsObjectFile", function(rdd, path) { standardGeneric("saveAsObjectFile") })
+
+#' @rdname saveAsObjectFile
+#' @aliases saveAsObjectFile,RDD
+setMethod("saveAsObjectFile",
+          signature(rdd = "RDD", path = "character"),
+          function(rdd, path) {
+            # If the RDD is in string format, need to serialize it before saving it because when
+            # objectFile() is invoked to load the saved file, only serialized format is assumed.
+            if (!rdd@env$serialized) {
+              rdd <- reserialize(rdd)
+            }
+            # Return nothing
+            invisible(callJMethod(getJRDD(rdd), "saveAsObjectFile", path))
+          })
+
+#' Save this RDD as a text file, using string representations of elements.
+#'
+#' @param rdd The RDD to save
+#' @param path The directory where the splits of the text file are saved
+#' @rdname saveAsTextFile
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, 1:3)
+#' saveAsTextFile(rdd, "/tmp/sparkR-tmp")
+#'}
+setGeneric("saveAsTextFile", function(rdd, path) { standardGeneric("saveAsTextFile") })
+
+#' @rdname saveAsTextFile
+#' @aliases saveAsTextFile,RDD
+setMethod("saveAsTextFile",
+          signature(rdd = "RDD", path = "character"),
+          function(rdd, path) {
+            func <- function(x) {
+              toString(x)
+            }
+            stringRdd <- lapply(rdd, func)
+            # Return nothing
+            invisible(
+              callJMethod(getJRDD(stringRdd, dataSerialization = FALSE), "saveAsTextFile", path))
+          })
+
 #' Return an RDD with the keys of each tuple.
 #'
 #' @param rdd The RDD from which the keys of each tuple is returned.
@@ -1088,12 +1286,12 @@ setMethod("pipeRDD",
 
 #' Partition an RDD by key
 #'
-#' This function operates on RDDs where every element is of the form list(K, V).
+#' This function operates on RDDs where every element is of the form list(K, V) or c(K, V).
 #' For each element of this RDD, the partitioner is used to compute a hash
 #' function and the RDD is partitioned using this hash value.
 #'
 #' @param rdd The RDD to partition. Should be an RDD where each element is
-#'             list(K, V).
+#'             list(K, V) or c(K, V).
 #' @param numPartitions Number of partitions to create.
 #' @param ... Other optional arguments to partitionBy.
 #'
@@ -1105,10 +1303,10 @@ setMethod("pipeRDD",
 #' @examples
 #'\dontrun{
 #' sc <- sparkR.init()
-#' pairs <- list(c(1, 2), c(1.1, 3), c(1, 4))
+#' pairs <- list(list(1, 2), list(1.1, 3), list(1, 4))
 #' rdd <- parallelize(sc, pairs)
 #' parts <- partitionBy(rdd, 2L)
-#' collectPartition(parts, 0L) # First partition should contain c(1,2) and c(1,3)
+#' collectPartition(parts, 0L) # First partition should contain list(1, 2) and list(1, 4)
 #'}
 setGeneric("partitionBy",
            function(rdd, numPartitions, ...) {
@@ -1125,59 +1323,55 @@ setMethod("partitionBy",
             #  partitionFunc <- hashCode
             #}
 
-            depsBin <- getDependencies(partitionFunc)
-            depsBinArr <- .jarray(depsBin)
+            depsBinArr <- getDependencies(partitionFunc)
 
-            serializedHashFunc <- serialize(as.character(substitute(partitionFunc)),
-                                            connection = NULL,
-                                            ascii = TRUE)
-            serializedHashFuncBytes <- .jarray(serializedHashFunc)
-
-            packageNamesArr <- .jarray(serialize(.sparkREnv$.packages,
+            serializedHashFuncBytes <- serialize(as.character(substitute(partitionFunc)),
                                                  connection = NULL,
-                                                 ascii = TRUE))
-            refs <- lapply(ls(.broadcastNames), function(name) {
-                           get(name, .broadcastNames) })
-            broadcastArr <- .jarray(refs,
-                                    "org/apache/spark/broadcast/Broadcast")
-            jrdd <- getJRDD(rdd)
+                                                 ascii = TRUE)
 
+            packageNamesArr <- serialize(.sparkREnv$.packages,
+                                         connection = NULL,
+                                         ascii = TRUE)
+            broadcastArr <- lapply(ls(.broadcastNames), function(name) {
+                                   get(name, .broadcastNames) })
+            jrdd <- getJRDD(rdd)
 
             # We create a PairwiseRRDD that extends RDD[(Array[Byte],
             # Array[Byte])], where the key is the hashed split, the value is
             # the content (key-val pairs).
-            pairwiseRRDD <- new(J("edu.berkeley.cs.amplab.sparkr.PairwiseRRDD"),
-                                jrdd$rdd(),
-                                as.integer(numPartitions),
-                                serializedHashFuncBytes,
-                                rdd@env$serialized,
-                                depsBinArr,
-                                packageNamesArr,
-                                as.character(.sparkREnv$libname),
-                                broadcastArr,
-                                jrdd$classTag())
+            pairwiseRRDD <- newJObject("edu.berkeley.cs.amplab.sparkr.PairwiseRRDD",
+                                       callJMethod(jrdd, "rdd"),
+                                       as.integer(numPartitions),
+                                       serializedHashFuncBytes,
+                                       rdd@env$serialized,
+                                       depsBinArr,
+                                       packageNamesArr,
+                                       as.character(.sparkREnv$libname),
+                                       broadcastArr,
+                                       callJMethod(jrdd, "classTag"))
 
             # Create a corresponding partitioner.
-            rPartitioner <- new(J("org.apache.spark.HashPartitioner"),
-                                as.integer(numPartitions))
+            rPartitioner <- newJObject("org.apache.spark.HashPartitioner",
+                                       as.integer(numPartitions))
 
             # Call partitionBy on the obtained PairwiseRDD.
-            javaPairRDD <- pairwiseRRDD$asJavaPairRDD()$partitionBy(rPartitioner)
+            javaPairRDD <- callJMethod(pairwiseRRDD, "asJavaPairRDD")
+            javaPairRDD <- callJMethod(javaPairRDD, "partitionBy", rPartitioner)
 
             # Call .values() on the result to get back the final result, the
             # shuffled acutal content key-val pairs.
-            r <- javaPairRDD$values()
+            r <- callJMethod(javaPairRDD, "values")
 
-            RDD(r, serialized=TRUE)
+            RDD(r, serialized = TRUE)
           })
 
 #' Group values by key
 #'
-#' This function operates on RDDs where every element is of the form list(K, V).
+#' This function operates on RDDs where every element is of the form list(K, V) or c(K, V).
 #' and group values for each key in the RDD into a single sequence.
 #'
 #' @param rdd The RDD to group. Should be an RDD where each element is
-#'             list(K, V).
+#'             list(K, V) or c(K, V).
 #' @param numPartitions Number of partitions to create.
 #' @return An RDD where each element is list(K, list(V))
 #' @seealso reduceByKey
@@ -1186,7 +1380,7 @@ setMethod("partitionBy",
 #' @examples
 #'\dontrun{
 #' sc <- sparkR.init()
-#' pairs <- list(c(1, 2), c(1.1, 3), c(1, 4))
+#' pairs <- list(list(1, 2), list(1.1, 3), list(1, 4))
 #' rdd <- parallelize(sc, pairs)
 #' parts <- groupByKey(rdd, 2L)
 #' grouped <- collect(parts)
@@ -1232,11 +1426,11 @@ setMethod("groupByKey",
 
 #' Merge values by key
 #'
-#' This function operates on RDDs where every element is of the form list(K, V).
+#' This function operates on RDDs where every element is of the form list(K, V) or c(K, V).
 #' and merges the values for each key using an associative reduce function.
 #'
 #' @param rdd The RDD to reduce by key. Should be an RDD where each element is
-#'             list(K, V).
+#'             list(K, V) or c(K, V).
 #' @param combineFunc The associative reduce function to use.
 #' @param numPartitions Number of partitions to create.
 #' @return An RDD where each element is list(K, V') where V' is the merged
@@ -1247,7 +1441,7 @@ setMethod("groupByKey",
 #' @examples
 #'\dontrun{
 #' sc <- sparkR.init()
-#' pairs <- list(c(1, 2), c(1.1, 3), c(1, 4))
+#' pairs <- list(list(1, 2), list(1.1, 3), list(1, 4))
 #' rdd <- parallelize(sc, pairs)
 #' parts <- reduceByKey(rdd, "+", 2L)
 #' reduced <- collect(parts)
@@ -1304,7 +1498,7 @@ setMethod("reduceByKey",
 #' }
 #'
 #' @param rdd The RDD to combine. Should be an RDD where each element is
-#'             list(K, V).
+#'             list(K, V) or c(K, V).
 #' @param createCombiner Create a combiner (C) given a value (V)
 #' @param mergeValue Merge the given value (V) with an existing combiner (C)
 #' @param mergeCombiners Merge two combiners and return a new combiner
@@ -1317,7 +1511,7 @@ setMethod("reduceByKey",
 #' @examples
 #'\dontrun{
 #' sc <- sparkR.init()
-#' pairs <- list(c(1, 2), c(1.1, 3), c(1, 4))
+#' pairs <- list(list(1, 2), list(1.1, 3), list(1, 4))
 #' rdd <- parallelize(sc, pairs)
 #' parts <- combineByKey(rdd, function(x) { x }, "+", "+", 2L)
 #' combined <- collect(parts)
@@ -1404,8 +1598,7 @@ setMethod("unionRDD",
           signature(x = "RDD", y = "RDD"),
           function(x, y) {
             if (x@env$serialized == y@env$serialized) {
-              jrdd <- .jcall(getJRDD(x), "Lorg/apache/spark/api/java/JavaRDD;",
-                             "union", getJRDD(y))
+              jrdd <- callJMethod(getJRDD(x), "union", getJRDD(y))
               union.rdd <- RDD(jrdd, x@env$serialized)
             } else {
               # One of the RDDs is not serialized, we need to serialize it first.
@@ -1414,8 +1607,7 @@ setMethod("unionRDD",
               } else {
                 y <- reserialize(y)
               }
-              jrdd <- .jcall(getJRDD(x), "Lorg/apache/spark/api/java/JavaRDD;",
-                             "union", getJRDD(y))
+              jrdd <- callJMethod(getJRDD(x), "union", getJRDD(y))
               union.rdd <- RDD(jrdd, TRUE)
             }
             union.rdd
@@ -1423,8 +1615,13 @@ setMethod("unionRDD",
 
 #' Join two RDDs
 #'
-#' @param rdd1 An RDD.
-#' @param rdd2 An RDD.
+#' This function joins two RDDs where every element is of the form list(K, V).
+#' The key types of the two RDDs should be the same.
+#'
+#' @param rdd1 An RDD to be joined. Should be an RDD where each element is
+#'             list(K, V).
+#' @param rdd2 An RDD to be joined. Should be an RDD where each element is
+#'             list(K, V).
 #' @param numPartitions Number of partitions to create.
 #' @return a new RDD containing all pairs of elements with matching keys in
 #'         two input RDDs.
@@ -1444,35 +1641,246 @@ setGeneric("join", function(rdd1, rdd2, numPartitions) { standardGeneric("join")
 setMethod("join",
           signature(rdd1 = "RDD", rdd2 = "RDD", numPartitions = "integer"),
           function(rdd1, rdd2, numPartitions) {
-            if (rdd1@env$serialized != rdd2@env$serialized) {
-              # One of the RDDs is not serialized, we need to serialize it first.
-              if (!rdd1@env$serialized) {
-                rdd1 <- reserialize(rdd1)
-              } else {
-                rdd2 <- reserialize(rdd2)
-              }
-            }  
             rdd1Tagged <- lapply(rdd1, function(x) { list(x[[1]], list(1L, x[[2]])) })
             rdd2Tagged <- lapply(rdd2, function(x) { list(x[[1]], list(2L, x[[2]])) })
             
             doJoin <- function(v) {
-              t1 <- Filter(function(x) { x[[1]] == 1L }, v)
-              t1 <- lapply(t1, function(x) { x[[2]] })
-              t2 <- Filter(function(x) { x[[1]] == 2L }, v)
-              t2 <- lapply(t2, function(x) { x[[2]] })
-              result <- list()
-              length(result) <- length(t1) * length(t2)
-              index <- 1L
-              for (i in t1) {
-                for (j in t2) {
-                  result[[index]] <- list(i, j)
-                  index <- index + 1L
-                }
-              }
-              result
+              joinTaggedList(v, list(FALSE, FALSE))
             }
             
             joined <- flatMapValues(groupByKey(unionRDD(rdd1Tagged, rdd2Tagged), numPartitions), doJoin)
           })
 
+#' Left outer join two RDDs
+#'
+#' This function left-outer-joins two RDDs where every element is of the form list(K, V).
+#' The key types of the two RDDs should be the same.
+#'
+#' @param rdd1 An RDD to be joined. Should be an RDD where each element is
+#'             list(K, V).
+#' @param rdd2 An RDD to be joined. Should be an RDD where each element is
+#'             list(K, V).
+#' @param numPartitions Number of partitions to create.
+#' @return For each element (k, v) in rdd1, the resulting RDD will either contain 
+#'         all pairs (k, (v, w)) for (k, w) in rdd2, or the pair (k, (v, NULL)) 
+#'         if no elements in rdd2 have key k.
+#' @rdname leftOuterJoin
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd1 <- parallelize(sc, list(list(1, 1), list(2, 4)))
+#' rdd2 <- parallelize(sc, list(list(1, 2), list(1, 3)))
+#' leftOuterJoin(rdd1, rdd2, 2L)
+#' # list(list(1, list(1, 2)), list(1, list(1, 3)), list(2, list(4, NULL)))
+#'}
+setGeneric("leftOuterJoin", function(rdd1, rdd2, numPartitions) { standardGeneric("leftOuterJoin") })
 
+#' @rdname leftOuterJoin
+#' @aliases leftOuterJoin,RDD,RDD-method
+setMethod("leftOuterJoin",
+          signature(rdd1 = "RDD", rdd2 = "RDD", numPartitions = "integer"),
+          function(rdd1, rdd2, numPartitions) {
+            rdd1Tagged <- lapply(rdd1, function(x) { list(x[[1]], list(1L, x[[2]])) })
+            rdd2Tagged <- lapply(rdd2, function(x) { list(x[[1]], list(2L, x[[2]])) })
+            
+            doJoin <- function(v) {
+              joinTaggedList(v, list(FALSE, TRUE))
+            }
+            
+            joined <- flatMapValues(groupByKey(unionRDD(rdd1Tagged, rdd2Tagged), numPartitions), doJoin)
+          })
+
+#' Right outer join two RDDs
+#'
+#' This function right-outer-joins two RDDs where every element is of the form list(K, V).
+#' The key types of the two RDDs should be the same.
+#'
+#' @param rdd1 An RDD to be joined. Should be an RDD where each element is
+#'             list(K, V).
+#' @param rdd2 An RDD to be joined. Should be an RDD where each element is
+#'             list(K, V).
+#' @param numPartitions Number of partitions to create.
+#' @return For each element (k, w) in rdd2, the resulting RDD will either contain
+#'         all pairs (k, (v, w)) for (k, v) in rdd1, or the pair (k, (NULL, w))
+#'         if no elements in rdd1 have key k.
+#' @rdname rightOuterJoin
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd1 <- parallelize(sc, list(list(1, 2), list(1, 3)))
+#' rdd2 <- parallelize(sc, list(list(1, 1), list(2, 4)))
+#' rightOuterJoin(rdd1, rdd2, 2L)
+#' # list(list(1, list(2, 1)), list(1, list(3, 1)), list(2, list(NULL, 4)))
+#'}
+setGeneric("rightOuterJoin", function(rdd1, rdd2, numPartitions) { standardGeneric("rightOuterJoin") })
+
+#' @rdname rightOuterJoin
+#' @aliases rightOuterJoin,RDD,RDD-method
+setMethod("rightOuterJoin",
+          signature(rdd1 = "RDD", rdd2 = "RDD", numPartitions = "integer"),
+          function(rdd1, rdd2, numPartitions) {
+            rdd1Tagged <- lapply(rdd1, function(x) { list(x[[1]], list(1L, x[[2]])) })
+            rdd2Tagged <- lapply(rdd2, function(x) { list(x[[1]], list(2L, x[[2]])) })
+            
+            doJoin <- function(v) {
+              joinTaggedList(v, list(TRUE, FALSE))
+            }
+            
+            joined <- flatMapValues(groupByKey(unionRDD(rdd1Tagged, rdd2Tagged), numPartitions), doJoin)
+          })
+
+#' Full outer join two RDDs
+#'
+#' This function full-outer-joins two RDDs where every element is of the form 
+#' list(K, V). 
+#' The key types of the two RDDs should be the same.
+#'
+#' @param rdd1 An RDD to be joined. Should be an RDD where each element is
+#'             list(K, V).
+#' @param rdd2 An RDD to be joined. Should be an RDD where each element is
+#'             list(K, V).
+#' @param numPartitions Number of partitions to create.
+#' @return For each element (k, v) in rdd1 and (k, w) in rdd2, the resulting RDD
+#'         will contain all pairs (k, (v, w)) for both (k, v) in rdd1 and and
+#'         (k, w) in rdd2, or the pair (k, (NULL, w))/(k, (v, NULL)) if no elements 
+#'         in rdd1/rdd2 have key k.
+#' @rdname fullOuterJoin
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd1 <- parallelize(sc, list(list(1, 2), list(1, 3), list(3, 3)))
+#' rdd2 <- parallelize(sc, list(list(1, 1), list(2, 4)))
+#' fullOuterJoin(rdd1, rdd2, 2L) # list(list(1, list(2, 1)),
+#'                               #      list(1, list(3, 1)),
+#'                               #      list(2, list(NULL, 4)))
+#'                               #      list(3, list(3, NULL)),
+#'}
+setGeneric("fullOuterJoin", function(rdd1, rdd2, numPartitions) { standardGeneric("fullOuterJoin") })
+
+#' @rdname fullOuterJoin
+#' @aliases fullOuterJoin,RDD,RDD-method
+
+setMethod("fullOuterJoin",
+          signature(rdd1 = "RDD", rdd2 = "RDD", numPartitions = "integer"),
+          function(rdd1, rdd2, numPartitions) {
+            rdd1Tagged <- lapply(rdd1, function(x) { list(x[[1]], list(1L, x[[2]])) })
+            rdd2Tagged <- lapply(rdd2, function(x) { list(x[[1]], list(2L, x[[2]])) })
+
+            doJoin <- function(v) {
+              joinTaggedList(v, list(TRUE, TRUE))
+            }
+
+            joined <- flatMapValues(groupByKey(unionRDD(rdd1Tagged, rdd2Tagged), numPartitions), doJoin)
+          })
+
+#' For each key k in several RDDs, return a resulting RDD that
+#' whose values are a list of values for the key in all RDDs.
+#'
+#' @param ... Several RDDs.
+#' @param numPartitions Number of partitions to create.
+#' @return a new RDD containing all pairs of elements with values in a list
+#' in all RDDs.
+#' @rdname cogroup
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd1 <- parallelize(sc, list(list(1, 1), list(2, 4)))
+#' rdd2 <- parallelize(sc, list(list(1, 2), list(1, 3)))
+#' cogroup(rdd1, rdd2, numPartitions = 2L) 
+#' # list(list(1, list(1, list(2, 3))), list(2, list(list(4), list()))
+#'}
+setGeneric("cogroup", 
+           function(..., numPartitions) { standardGeneric("cogroup") },
+           signature = "...")
+
+#' @rdname cogroup
+#' @aliases cogroup,RDD-method
+setMethod("cogroup",
+          "RDD",
+          function(..., numPartitions) {
+            rdds <- list(...)
+            rddsLen <- length(rdds)
+            for (i in 1:rddsLen) {
+              rdds[[i]] <- lapply(rdds[[i]], 
+                                  function(x) { list(x[[1]], list(i, x[[2]])) })
+              # TODO(hao): As issue [SparkR-142] mentions, the right value of i
+              # will not be captured into UDF if getJRDD is not invoked.
+              # It should be resolved together with that issue.
+              getJRDD(rdds[[i]])  # Capture the closure.
+            }
+            union.rdd <- Reduce(unionRDD, rdds)
+            group.func <- function(vlist) {
+              res <- list()
+              length(res) <- rddsLen
+              for (x in vlist) {
+                i <- x[[1]]
+                acc <- res[[i]]
+                # Create an accumulator.
+                if (is.null(acc)) {
+                  acc <- SparkR:::initAccumulator()
+                }
+                SparkR:::addItemToAccumulator(acc, x[[2]])
+                res[[i]] <- acc
+              }
+              lapply(res, function(acc) {
+                if (is.null(acc)) {
+                  list()
+                } else {
+                  acc$data
+                }
+              })
+            }
+            cogroup.rdd <- mapValues(groupByKey(union.rdd, numPartitions), 
+                                     group.func)
+          })
+
+# TODO: Consider caching the name in the RDD's environment
+#' Return an RDD's name.
+#'
+#' @param rdd The RDD whose name is returned.
+#' @rdname name
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, list(1,2,3))
+#' name(rdd) # NULL (if not set before)
+#'}
+setGeneric("name", function(rdd) { standardGeneric("name") })
+
+#' @rdname name
+#' @aliases name,RDD
+setMethod("name",
+          signature(rdd = "RDD"),
+          function(rdd) {
+            callJMethod(getJRDD(rdd), "name")
+          })
+
+#' Set an RDD's name.
+#'
+#' @param rdd The RDD whose name is to be set.
+#' @param name The RDD name to be set.
+#' @return a new RDD renamed.
+#' @rdname setName
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, list(1,2,3))
+#' setName(rdd, "myRDD")
+#' name(rdd) # "myRDD"
+#'}
+setGeneric("setName", function(rdd, name) { standardGeneric("setName") })
+
+#' @rdname setName
+#' @aliases setName,RDD
+setMethod("setName",
+          signature(rdd = "RDD", name = "character"),
+          function(rdd, name) {
+            callJMethod(getJRDD(rdd), "setName", name)
+            rdd
+          })

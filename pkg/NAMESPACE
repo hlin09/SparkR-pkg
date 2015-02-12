@@ -1,10 +1,10 @@
 #exportPattern("^[[:alpha:]]+")
 exportClasses("RDD")
-exportClasses("PipelinedRDD")
 exportClasses("Broadcast")
 exportMethods(
               "cache",
               "checkpoint",
+              "cogroup",
               "collect",
               "collectPartition",
               "combineByKey",
@@ -16,13 +16,18 @@ exportMethods(
               "filterRDD",
               "flatMap",
               "flatMapValues",
+              "foreach",
+              "foreachPartition",
+              "fullOuterJoin",
               "groupByKey",
               "join",
+              "keyBy",
               "keys",
               "length",
               "lapply",
               "lapplyPartition",
               "lapplyPartitionsWithIndex",
+              "leftOuterJoin",
               "lookup",
               "map",
               "mapPartitions",
@@ -32,10 +37,14 @@ exportMethods(
               "minimum",
               "numPartitions",
               "partitionBy",
+              "persist",
               "pipeRDD",
               "reduce",
               "reduceByKey",
+              "rightOuterJoin",
               "sampleRDD",
+              "saveAsTextFile",
+              "saveAsObjectFile",
               "take",
               "takeSample",
               "unionRDD",
@@ -47,6 +56,7 @@ exportMethods(
 # S3 methods exported
 export(
        "textFile",
+       "objectFile",
        "parallelize",
        "hashCode",
        "includePackage",
@@ -55,3 +65,6 @@ export(
        "setCheckpointDir"
       )
 export("sparkR.init")
+export("print.jobj")
+useDynLib(SparkR, stringHashCode)
+importFrom(methods, setGeneric, setMethod, setOldClass)

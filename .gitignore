@@ -1,4 +1,6 @@
 *.class
+*.so
+*.o
 # Package Files #
 *.jar
 *.war
@@ -16,3 +18,5 @@ work/
 *~
 .Rproj.user
 SparkR-pkg.Rproj
+*.o
+*.so

@@ -1,13 +1,5 @@
 # Worker class
 
-source_local <- function(fname) {
-  argv <- commandArgs(trailingOnly = FALSE)
-  base_dir <- dirname(substring(argv[grep("--file=", argv)], 8))
-  source(paste(base_dir, fname, sep="/"))
-}
-
-source_local("serialize.R")
-
 # NOTE: We use "stdin" to get the process stdin instead of the command line
 inputConStdin  <- file("stdin", open = "rb")
 
@@ -27,73 +19,71 @@ inFileName <- readLines(inputConStdin, n = 1)
 inputCon <- file(inFileName, open = "rb")
 
 # read the index of the current partition inside the RDD
-splitIndex <- readInt(inputCon)
+splitIndex <- SparkR:::readInt(inputCon)
 
 # read the function; if used for pairwise RRDD, this is the hash function.
-execLen <- readInt(inputCon)
-execFunctionName <- unserialize(readRawLen(inputCon, execLen))
+execLen <- SparkR:::readInt(inputCon)
+execFunctionName <- unserialize(SparkR:::readRawLen(inputCon, execLen))
 
-# read the isSerialized bit flag
-isSerialized <- readInt(inputCon)
+# read the isInputSerialized bit flag
+isInputSerialized <- SparkR:::readInt(inputCon)
+
+# read the isOutputSerialized bit flag
+isOutputSerialized <- SparkR:::readInt(inputCon)
 
 # Redirect stdout to stderr to prevent print statements from
 # interfering with outputStream
 sink(stderr())
 
-# read function dependencies
-depsLen <- readInt(inputCon)
-if (depsLen > 0) {
-  execFunctionDeps <- readRawLen(inputCon, depsLen)
-
-  # load the dependencies into current environment
-  depsFileName <- tempfile(pattern="spark-exec", fileext=".deps")
-  depsFile <- file(depsFileName, open="wb")
-  writeBin(execFunctionDeps, depsFile, endian="big")
-  close(depsFile)
-}
-
 # Include packages as required
-packageNames <- unserialize(readRaw(inputCon))
+packageNames <- unserialize(SparkR:::readRaw(inputCon))
 for (pkg in packageNames) {
   suppressPackageStartupMessages(require(as.character(pkg), character.only=TRUE))
 }
 
+# read function dependencies
+depsLen <- SparkR:::readInt(inputCon)
 if (depsLen > 0) {
-	load(depsFileName)
-	unlink(depsFileName)
+  execFunctionDeps <- SparkR:::readRawLen(inputCon, depsLen)
+  # load the dependencies into current environment
+  load(rawConnection(execFunctionDeps, open='rb'))
 }
 
 # Read and set broadcast variables
-numBroadcastVars <- readInt(inputCon)
+numBroadcastVars <- SparkR:::readInt(inputCon)
 if (numBroadcastVars > 0) {
   for (bcast in seq(1:numBroadcastVars)) {
-    bcastId <- readInt(inputCon)
-    value <- unserialize(readRaw(inputCon))
+    bcastId <- SparkR:::readInt(inputCon)
+    value <- unserialize(SparkR:::readRaw(inputCon))
     setBroadcastValue(bcastId, value)
   }
 }
 
 # If -1: read as normal RDD; if >= 0, treat as pairwise RDD and treat the int
 # as number of partitions to create.
-numPartitions <- readInt(inputCon)
+numPartitions <- SparkR:::readInt(inputCon)
 
-isEmpty <- readInt(inputCon)
+isEmpty <- SparkR:::readInt(inputCon)
 
 if (isEmpty != 0) {
 
   if (numPartitions == -1) {
-    if (isSerialized) {
+    if (isInputSerialized) {
       # Now read as many characters as described in funcLen
-      data <- readDeserialize(inputCon)
+      data <- SparkR:::readDeserialize(inputCon)
     } else {
       data <- readLines(inputCon)
     }
     output <- do.call(execFunctionName, list(splitIndex, data))
-    writeRaw(outputCon, output)
+    if (isOutputSerialized) {
+      SparkR:::writeRawSerialize(outputCon, output)
+    } else {
+      SparkR:::writeStrings(outputCon, output)
+    }
   } else {
-    if (isSerialized) {
+    if (isInputSerialized) {
       # Now read as many characters as described in funcLen
-      data <- readDeserialize(inputCon)
+      data <- SparkR:::readDeserialize(inputCon)
     } else {
       data <- readLines(inputCon)
     }
@@ -108,31 +98,32 @@ if (isEmpty != 0) {
       acc <- res[[bucket]]
       # Create a new accumulator
       if (is.null(acc)) {
-        acc <- new.env()
-        acc$counter <- 0
-        acc$data <- list(NULL)
-        acc$size <- 1
+        acc <- SparkR:::initAccumulator()
       }
-      addItemToAccumulator(acc, tuple)
+      SparkR:::addItemToAccumulator(acc, tuple)
       res[[bucket]] <- acc
     }
     invisible(lapply(data, hashTupleToEnvir))
 
     # Step 2: write out all of the environment as key-value pairs.
     for (name in ls(res)) {
-      writeInt(outputCon, 2L)
-      writeInt(outputCon, as.integer(name))
+      SparkR:::writeInt(outputCon, 2L)
+      SparkR:::writeInt(outputCon, as.integer(name))
       # Truncate the accumulator list to the number of elements we have
       length(res[[name]]$data) <- res[[name]]$counter
-      writeRaw(outputCon, res[[name]]$data)
+      SparkR:::writeRawSerialize(outputCon, res[[name]]$data)
     }
   }
 }
 
 # End of output
-writeInt(outputCon, 0L)
+if (isOutputSerialized) {
+  SparkR:::writeInt(outputCon, 0L)
+}
 
 close(outputCon)
+close(inputCon)
+unlink(inFileName)
 
 # Restore stdout
 sink()

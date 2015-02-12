@@ -15,6 +15,7 @@ organization := "edu.berkeley.cs.amplab"
 scalaVersion := "2.10.3"
 
 libraryDependencies ++= Seq(
+  "io.netty" % "netty-all" % "4.0.23.Final",
   "org.slf4j" % "slf4j-api" % "1.7.2",
   "org.slf4j" % "slf4j-log4j12" % "1.7.2"
 )
@@ -25,6 +26,7 @@ libraryDependencies ++= Seq(
   val excludeNetty = ExclusionRule(organization = "org.jboss.netty")
   val excludeAsm = ExclusionRule(organization = "asm")
   val excludeSnappy = ExclusionRule(organization = "org.xerial.snappy")
+  val excludeHadoop = ExclusionRule(organization = "org.apache.hadoop")
   val sbtYarnFlag = scala.util.Properties.envOrElse("USE_YARN", "")
   val defaultHadoopVersion = "1.0.4"
   val defaultSparkVersion = "1.1.0"
@@ -32,7 +34,7 @@ libraryDependencies ++= Seq(
   val sparkVersion = scala.util.Properties.envOrElse("SPARK_VERSION", defaultSparkVersion)
   libraryDependencies ++= Seq(
     "org.apache.hadoop" % "hadoop-client" % hadoopVersion excludeAll(excludeJackson, excludeNetty, excludeAsm, excludeCglib),
-    "org.apache.spark" % "spark-core_2.10" % sparkVersion
+    "org.apache.spark" % "spark-core_2.10" % sparkVersion excludeAll(excludeHadoop)
   ) ++ (if (sbtYarnFlag != "") {
           val defaultYarnVersion = "2.4.0"
           val yarnVersion = scala.util.Properties.envOrElse("SPARK_YARN_VERSION", defaultYarnVersion)
