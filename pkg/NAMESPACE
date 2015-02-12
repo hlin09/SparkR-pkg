@@ -32,6 +32,7 @@ exportMethods(
               "minimum",
               "numPartitions",
               "partitionBy",
+              "pipeRDD",
               "reduce",
               "reduceByKey",
               "sampleRDD",

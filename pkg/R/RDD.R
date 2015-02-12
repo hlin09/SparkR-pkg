@@ -1042,6 +1042,48 @@ setMethod("flatMapValues",
             flatMap(X, flatMapFunc)
           })
 
+#' Pipes elements to a forked externel process.
+#'
+#' The same as `pipe()' in Spark.
+#'
+#' @param rdd The RDD whose elements are piped to the forked externel process.
+#' @param command the command to fork an externel process.
+#' @return a new RDD created by piping all elements to a forked externel process.
+#' @rdname pipeRDD
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, 1:10)
+#' collect(pipeRDD(rdd, "cat")
+#' Output: c("1", "2", ..., "10")
+#'}
+setGeneric("pipeRDD", function(rdd, command) { standardGeneric("pipeRDD") })
+
+#' @rdname pipeRDD
+#' @aliases pipeRDD,RDD,character-method
+setMethod("pipeRDD",
+          signature(rdd = "RDD", command = "character"),
+          function(rdd, command) {
+            func <- function(part) {
+              filename <- tempfile(pattern = "sparkr-pipe")
+              on.exit(unlink(filename))
+              pipeIn <- pipe(paste(command, ">", filename, sep=" "), "w")
+              lapply(part, function(x) {
+                elem <- sub("\\s+$", "", as.character(x))
+                cat(elem, "\n", file = pipeIn, append = TRUE)
+              })
+              close(pipeIn)
+              pipeOut <- file(filename, "r")
+              res <- as.list(scan(pipeOut, what = "character", sep = "\n", 
+                                  quiet = TRUE, strip.white = TRUE, 
+                                  blank.lines.skip = FALSE))
+              close(pipeOut)
+              res
+            }
+            lapplyPartition(rdd, func)
+          })
+
 ############ Shuffle Functions ############
 
 #' Partition an RDD by key
