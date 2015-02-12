@@ -358,6 +358,7 @@ setMethod("collect",
             convertJListToRList(collected, flatten)
           })
 
+
 #' @rdname collect-methods
 #' @export
 #' @description
@@ -382,6 +383,29 @@ setMethod("collectPartition",
             convertJListToRList(jList, flatten = TRUE)
           })
 
+#' @rdname collect-methods
+#' @export
+#' @description
+#' \code{collectAsMap} returns a named list as a map that contains all of the elements
+#' in a key-value pair RDD. 
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, list(list(1, 2), list(3, 4)), 2L)
+#' collectAsMap(rdd) # list(`1` = 2, `3` = 4)
+#'}
+setGeneric("collectAsMap", function(rdd) { standardGeneric("collectAsMap") })
+
+#' @rdname collect-methods
+#' @aliases collectAsMap,RDD-method
+setMethod("collectAsMap",
+          signature(rdd = "RDD"),
+          function(rdd) {
+            pairList <- collect(rdd)
+            map <- new.env()
+            lapply(pairList, function(x) { assign(as.character(x[[1]]), x[[2]], envir = map) })
+            as.list(map)
+          })
 
 #' Look up elements of a key in an RDD
 #'
@@ -1240,6 +1264,116 @@ setMethod("flatMapValues",
             flatMap(X, flatMapFunc)
           })
 
+#' Sort an RDD by the given key function.
+#'
+#' @param rdd An RDD to be sorted.
+#' @param func A function used to compute the sort key for each element.
+#' @param ascending A flag to indicate whether the sorting is ascending or descending.
+#' @param numPartitions Number of partitions to create.
+#' @return An RDD where all elements are sorted.
+#' @rdname sortBy
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, list(3, 2, 1))
+#' collect(sortBy(rdd, function(x) { x })) # list (1, 2, 3)
+#'}
+setGeneric("sortBy", function(rdd,
+                              func,
+                              ascending = TRUE,
+                              numPartitions = 1L) {
+                       standardGeneric("sortBy")
+                     })
+
+#' @rdname sortBy
+#' @aliases sortBy,RDD,RDD-method
+setMethod("sortBy",
+          signature(rdd = "RDD", func = "function"),
+          function(rdd, func, ascending = TRUE, numPartitions = SparkR::numPartitions(rdd)) {          
+            values(sortByKey(keyBy(rdd, func), ascending, numPartitions))
+          })
+
+# Helper function to get first N elements from an RDD in the specified order.
+# Param:
+#   rdd An RDD.
+#   num Number of elements to return.
+#   ascending A flag to indicate whether the sorting is ascending or descending.
+# Return:
+#   A list of the first N elements from the RDD in the specified order.
+#
+takeOrderedElem <- function(rdd, num, ascending = TRUE) {          
+  if (num <= 0L) {
+    return(list())
+  }
+  
+  partitionFunc <- function(part) {
+    if (num < length(part)) {
+      # R limitation: order works only on primitive types!
+      ord <- order(unlist(part, recursive = FALSE), decreasing = !ascending)
+      list(part[ord[1:num]])
+    } else {
+      list(part)
+    }
+  }
+
+  reduceFunc <- function(elems, part) {
+    newElems <- append(elems, part)
+    # R limitation: order works only on primitive types!
+    ord <- order(unlist(newElems, recursive = FALSE), decreasing = !ascending)
+    newElems[ord[1:num]]
+  }
+  
+  newRdd <- mapPartitions(rdd, partitionFunc)
+  reduce(newRdd, reduceFunc)
+}
+
+#' Returns the first N elements from an RDD in ascending order.
+#'
+#' @param rdd An RDD.
+#' @param num Number of elements to return.
+#' @return The first N elements from the RDD in ascending order.
+#' @rdname takeOrdered
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, list(10, 1, 2, 9, 3, 4, 5, 6, 7))
+#' takeOrdered(rdd, 6L) # list(1, 2, 3, 4, 5, 6)
+#'}
+setGeneric("takeOrdered", function(rdd, num) { standardGeneric("takeOrdered") })
+
+#' @rdname takeOrdered
+#' @aliases takeOrdered,RDD,RDD-method
+setMethod("takeOrdered",
+          signature(rdd = "RDD", num = "integer"),
+          function(rdd, num) {          
+            takeOrderedElem(rdd, num)
+          })
+
+#' Returns the top N elements from an RDD.
+#'
+#' @param rdd An RDD.
+#' @param num Number of elements to return.
+#' @return The top N elements from the RDD.
+#' @rdname top
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, list(10, 1, 2, 9, 3, 4, 5, 6, 7))
+#' top(rdd, 6L) # list(10, 9, 7, 6, 5, 4)
+#'}
+setGeneric("top", function(rdd, num) { standardGeneric("top") })
+
+#' @rdname top
+#' @aliases top,RDD,RDD-method
+setMethod("top",
+          signature(rdd = "RDD", num = "integer"),
+          function(rdd, num) {          
+            takeOrderedElem(rdd, num, FALSE)
+          })
+
 ############ Shuffle Functions ############
 
 #' Partition an RDD by key
@@ -1358,26 +1492,32 @@ setMethod("groupByKey",
             groupVals <- function(part) {
               vals <- new.env()
               keys <- new.env()
+              pred <- function(item) exists(item$hash, keys)
+              appendList <- function(acc, x) {
+                addItemToAccumulator(acc, x)
+                acc
+              }
+              makeList <- function(x) {
+                acc <- initAccumulator()
+                addItemToAccumulator(acc, x)
+                acc
+              }
               # Each item in the partition is list of (K, V)
               lapply(part,
                      function(item) {
-                       hashVal <- as.character(hashCode(item[[1]]))
-                       if (exists(hashVal, vals)) {
-                         acc <- vals[[hashVal]]
-                         acc[[length(acc) + 1]] <- item[[2]]
-                         vals[[hashVal]] <- acc
-                       } else {
-                         vals[[hashVal]] <- list(item[[2]])
-                         keys[[hashVal]] <- item[[1]]
-                       }
+                       item$hash <- as.character(hashCode(item[[1]]))
+                       updateOrCreatePair(item, keys, vals, pred,
+                                          appendList, makeList)
                      })
+              # extract out data field
+              vals <- eapply(vals,
+                             function(x) {
+                               length(x$data) <- x$counter
+                               x$data
+                             })
               # Every key in the environment contains a list
               # Convert that to list(K, Seq[V])
-              grouped <- lapply(ls(vals),
-                                function(name) {
-                                  list(keys[[name]], vals[[name]])
-                                })
-              grouped
+              convertEnvsToList(keys, vals)
             }
             lapplyPartition(shuffled, groupVals)
           })
@@ -1418,26 +1558,76 @@ setMethod("reduceByKey",
             reduceVals <- function(part) {
               vals <- new.env()
               keys <- new.env()
+              pred <- function(item) exists(item$hash, keys)
               lapply(part,
                      function(item) {
-                       hashVal <- as.character(hashCode(item[[1]]))
-                       if (exists(hashVal, vals)) {
-                         vals[[hashVal]] <- do.call(
-                           combineFunc, list(vals[[hashVal]], item[[2]]))
-                       } else {
-                         vals[[hashVal]] <- item[[2]]
-                         keys[[hashVal]] <- item[[1]]
-                       }
+                       item$hash <- as.character(hashCode(item[[1]]))
+                       updateOrCreatePair(item, keys, vals, pred, combineFunc, identity)
                      })
-              combined <- lapply(ls(vals),
-                                  function(name) {
-                                    list(keys[[name]], vals[[name]])
-                                  })
-              combined
+              convertEnvsToList(keys, vals)
             }
             locallyReduced <- lapplyPartition(rdd, reduceVals)
             shuffled <- partitionBy(locallyReduced, numPartitions)
             lapplyPartition(shuffled, reduceVals)
+          })
+
+#' Merge values by key locally
+#'
+#' This function operates on RDDs where every element is of the form list(K, V) or c(K, V).
+#' and merges the values for each key using an associative reduce function, but return the
+#' results immediately to the driver as an R list.
+#'
+#' @param rdd The RDD to reduce by key. Should be an RDD where each element is
+#'             list(K, V) or c(K, V).
+#' @param combineFunc The associative reduce function to use.
+#' @return A list of elements of type list(K, V') where V' is the merged value for each key
+#' @rdname reduceByKeyLocally
+#' @seealso reduceByKey
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' pairs <- list(list(1, 2), list(1.1, 3), list(1, 4))
+#' rdd <- parallelize(sc, pairs)
+#' reduced <- reduceByKeyLocally(rdd, "+")
+#' reduced # list(list(1, 6), list(1.1, 3))
+#'}
+setGeneric("reduceByKeyLocally",
+           function(rdd, combineFunc) {
+             standardGeneric("reduceByKeyLocally")
+           })
+
+#' @rdname reduceByKeyLocally
+#' @aliases reduceByKeyLocally,RDD,integer-method
+setMethod("reduceByKeyLocally",
+          signature(rdd = "RDD", combineFunc = "ANY"),
+          function(rdd, combineFunc) {
+            reducePart <- function(part) {
+              vals <- new.env()
+              keys <- new.env()
+              pred <- function(item) exists(item$hash, keys)
+              lapply(part,
+                     function(item) {
+                       item$hash <- as.character(hashCode(item[[1]]))
+                       updateOrCreatePair(item, keys, vals, pred, combineFunc, identity)
+                     })
+              list(list(keys, vals)) # return hash to avoid re-compute in merge
+            }
+            mergeParts <- function(accum, x) {
+              pred <- function(item) {
+                exists(item$hash, accum[[1]])
+              }
+              lapply(ls(x[[1]]),
+                     function(name) {
+                       item <- list(x[[1]][[name]], x[[2]][[name]])
+                       item$hash <- name
+                       updateOrCreatePair(item, accum[[1]], accum[[2]], pred, combineFunc, identity)
+                     })
+              accum
+            }
+            reduced <- mapPartitions(rdd, reducePart)
+            merged <- reduce(reduced, mergeParts)
+            convertEnvsToList(merged[[1]], merged[[2]])
           })
 
 #' Combine values by key
@@ -1489,46 +1679,28 @@ setMethod("combineByKey",
             combineLocally <- function(part) {
               combiners <- new.env()
               keys <- new.env()
+              pred <- function(item) exists(item$hash, keys)
               lapply(part,
                      function(item) {
-                       k <- as.character(item[[1]])
-                       if (!exists(k, keys)) {
-                         combiners[[k]] <- do.call(createCombiner,
-                                                   list(item[[2]]))
-                         keys[[k]] <- item[[1]]
-                       } else {
-                         combiners[[k]] <- do.call(mergeValue,
-                                                   list(combiners[[k]],
-                                                        item[[2]]))
-                       }
+                       item$hash <- as.character(item[[1]])
+                       updateOrCreatePair(item, keys, combiners, pred, mergeValue, createCombiner)
                      })
-              lapply(ls(keys), function(k) {
-                      list(keys[[k]], combiners[[k]])
-                     })
+              convertEnvsToList(keys, combiners)
             }
             locallyCombined <- lapplyPartition(rdd, combineLocally)
             shuffled <- partitionBy(locallyCombined, numPartitions)
             mergeAfterShuffle <- function(part) {
               combiners <- new.env()
               keys <- new.env()
+              pred <- function(item) exists(item$hash, keys)
               lapply(part,
                      function(item) {
-                       k <- as.character(item[[1]])
-                       if (!exists(k, combiners)) {
-                         combiners[[k]] <- item[[2]]
-                         keys[[k]] <- item[[1]]
-                       } else {
-                         combiners[[k]] <- do.call(mergeCombiners,
-                                                   list(combiners[[k]],
-                                                        item[[2]]))
-                       }
+                       item$hash <- as.character(item[[1]])
+                       updateOrCreatePair(item, keys, combiners, pred, mergeCombiners, identity)
                      })
-              lapply(ls(keys), function(k) {
-                      list(keys[[k]], combiners[[k]])
-                     })
+              convertEnvsToList(keys, combiners)
             }
-            combined <-lapplyPartition(shuffled, mergeAfterShuffle)
-            combined
+            lapplyPartition(shuffled, mergeAfterShuffle)
           })
 
 ############ Binary Functions #############
@@ -1796,6 +1968,76 @@ setMethod("cogroup",
                                      group.func)
           })
 
+#' Sort a (k, v) pair RDD by k.
+#'
+#' @param rdd A (k, v) pair RDD to be sorted.
+#' @param ascending A flag to indicate whether the sorting is ascending or descending.
+#' @param numPartitions Number of partitions to create.
+#' @return An RDD where all (k, v) pair elements are sorted.
+#' @rdname sortByKey
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, list(list(3, 1), list(2, 2), list(1, 3)))
+#' collect(sortByKey(rdd)) # list (list(1, 3), list(2, 2), list(3, 1))
+#'}
+setGeneric("sortByKey", function(rdd,
+                                 ascending = TRUE,
+                                 numPartitions = 1L) {
+                          standardGeneric("sortByKey")
+                        })
+
+#' @rdname sortByKey
+#' @aliases sortByKey,RDD,RDD-method
+setMethod("sortByKey",
+          signature(rdd = "RDD"),
+          function(rdd, ascending = TRUE, numPartitions = SparkR::numPartitions(rdd)) {
+            rangeBounds <- list()
+            
+            if (numPartitions > 1) {
+              rddSize <- count(rdd)
+              # constant from Spark's RangePartitioner
+              maxSampleSize <- numPartitions * 20
+              fraction <- min(maxSampleSize / max(rddSize, 1), 1.0)
+              
+              samples <- collect(keys(sampleRDD(rdd, FALSE, fraction, 1L)))
+              
+              # Note: the built-in R sort() function only works on atomic vectors
+              samples <- sort(unlist(samples, recursive = FALSE), decreasing = !ascending)
+              
+              if (length(samples) > 0) {
+                rangeBounds <- lapply(seq_len(numPartitions - 1),
+                                      function(i) {
+                                        j <- ceiling(length(samples) * i / numPartitions)
+                                        samples[j]
+                                      })
+              }
+            }
+
+            rangePartitionFunc <- function(key) {
+              partition <- 0
+              
+              # TODO: Use binary search instead of linear search, similar with Spark
+              while (partition < length(rangeBounds) && key > rangeBounds[[partition + 1]]) {
+                partition <- partition + 1
+              }
+              
+              if (ascending) {
+                partition
+              } else {
+                numPartitions - partition - 1
+              }
+            }
+            
+            partitionFunc <- function(part) {
+              sortKeyValueList(part, decreasing = !ascending)
+            }
+            
+            newRDD <- partitionBy(rdd, numPartitions, rangePartitionFunc)
+            lapplyPartition(newRDD, partitionFunc)
+          })
+          
 # TODO: Consider caching the name in the RDD's environment
 #' Return an RDD's name.
 #'

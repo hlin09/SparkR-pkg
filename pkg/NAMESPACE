@@ -6,6 +6,7 @@ exportMethods(
               "checkpoint",
               "cogroup",
               "collect",
+              "collectAsMap",
               "collectPartition",
               "combineByKey",
               "count",
@@ -40,12 +41,17 @@ exportMethods(
               "persist",
               "reduce",
               "reduceByKey",
+              "reduceByKeyLocally",
               "rightOuterJoin",
               "sampleRDD",
               "saveAsTextFile",
               "saveAsObjectFile",
+              "sortBy",
+              "sortByKey",
               "take",
+              "takeOrdered",
               "takeSample",
+              "top",
               "unionRDD",
               "unpersist",
               "value",
@@ -64,6 +70,7 @@ export(
        "setCheckpointDir"
       )
 export("sparkR.init")
+export("sparkR.stop")
 export("print.jobj")
 useDynLib(SparkR, stringHashCode)
 importFrom(methods, setGeneric, setMethod, setOldClass)
