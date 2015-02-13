@@ -315,9 +315,11 @@ test_that("values() on RDDs", {
 })
 
 test_that("pipeRDD() on RDDs", {
-  actual <- collect(pipeRDD(rdd, "cat"))
-  expected <- as.list(as.character(1:10))
-  expect_equal(actual, expected)
+  if (.Platform$OS.type == "unix") {
+    actual <- collect(pipeRDD(rdd, "cat"))
+    expected <- as.list(as.character(1:10))
+    expect_equal(actual, expected)
+  }
   
   rev.nums <- 9:0
   rev.rdd <- parallelize(sc, rev.nums, 2L)
