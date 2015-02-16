@@ -70,6 +70,7 @@ export(
        "setCheckpointDir"
       )
 export("sparkR.init")
+export("sparkR.streaming.init")
 export("sparkR.stop")
 export("print.jobj")
 useDynLib(SparkR, stringHashCode)
