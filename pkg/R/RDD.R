@@ -1378,10 +1378,8 @@ setMethod("top",
 #'
 #' The same as `pipe()' in Spark.
 #'
-#' @param rdd the RDD whose elements are piped to the forked externel process.
+#' @param rdd The RDD whose elements are piped to the forked externel process.
 #' @param command the command to fork an externel process.
-#' @param ... other arguments passed to pipeRDD.
-#' @param env character vector of name=value strings to set environment variables.
 #' @return a new RDD created by piping all elements to a forked externel process.
 #' @rdname pipeRDD
 #' @export
@@ -1392,20 +1390,28 @@ setMethod("top",
 #' collect(pipeRDD(rdd, "cat")
 #' Output: c("1", "2", ..., "10")
 #'}
-setGeneric("pipeRDD", function(rdd, command, ...) { standardGeneric("pipeRDD") })
+setGeneric("pipeRDD", function(rdd, command) { standardGeneric("pipeRDD") })
 
 #' @rdname pipeRDD
 #' @aliases pipeRDD,RDD,character-method
 setMethod("pipeRDD",
           signature(rdd = "RDD", command = "character"),
-          function(rdd, command, env = character()) {
+          function(rdd, command) {
             func <- function(part) {
-              trim.trailing.func <- function(x) {
-                sub("\\s+$", "", as.character(x))
-              }
-              input <- unlist(lapply(part, trim.trailing.func))
-              res <- system2(command, stdout = TRUE, input = input, env = env)
-              lapply(res, trim.trailing.func)
+              filename <- tempfile(pattern = "sparkr-pipe")
+              on.exit(unlink(filename))
+              pipeIn <- pipe(paste(command, ">", filename, sep=" "), "w")
+              lapply(part, function(x) {
+                elem <- sub("\\s+$", "", as.character(x))
+                cat(elem, "\n", file = pipeIn, append = TRUE)
+              })
+              close(pipeIn)
+              pipeOut <- file(filename, "r")
+              res <- as.list(scan(pipeOut, what = "character", sep = "\n", 
+                                  quiet = TRUE, strip.white = TRUE, 
+                                  blank.lines.skip = FALSE))
+              close(pipeOut)
+              res
             }
             lapplyPartition(rdd, func)
           })
