@@ -302,6 +302,28 @@ test_that("top() on RDDs", {
   expect_equal(actual, as.list(sort(unlist(l), decreasing = TRUE))[1:3])
 })
 
+test_that("fold() on RDDs", {
+  actual <- fold(rdd, 0, "+")
+  expect_equal(actual, Reduce("+", nums, 0))
+  
+  rdd <- parallelize(sc, list())
+  actual <- fold(rdd, 0, "+")
+  expect_equal(actual, 0)
+})
+
+test_that("aggregateRDD() on RDDs", {
+  rdd <- parallelize(sc, list(1, 2, 3, 4))
+  zeroValue <- list(0, 0)
+  seqOp <- function(x, y) { list(x[[1]] + y, x[[2]] + 1) }
+  combOp <- function(x, y) { list(x[[1]] + y[[1]], x[[2]] + y[[2]]) }
+  actual <- aggregateRDD(rdd, zeroValue, seqOp, combOp)
+  expect_equal(actual, list(10, 4))
+  
+  rdd <- parallelize(sc, list())
+  actual <- aggregateRDD(rdd, zeroValue, seqOp, combOp)
+  expect_equal(actual, list(0, 0))
+})
+
 test_that("keys() on RDDs", {
   keys <- keys(intRdd)
   actual <- collect(keys)
@@ -312,6 +334,23 @@ test_that("values() on RDDs", {
   values <- values(intRdd)
   actual <- collect(values)
   expect_equal(actual, lapply(intPairs, function(x) { x[[2]] }))
+})
+
+test_that("pipeRDD() on RDDs", {
+  actual <- collect(pipeRDD(rdd, "more"))
+  expected <- as.list(as.character(1:10))
+  expect_equal(actual, expected)
+  
+  trailed.rdd <- parallelize(sc, c("1", "", "2\n", "3\n\r\n"))
+  actual <- collect(pipeRDD(trailed.rdd, "sort"))
+  expected <- list("", "1", "2", "3")
+  expect_equal(actual, expected)
+  
+  rev.nums <- 9:0
+  rev.rdd <- parallelize(sc, rev.nums, 2L)
+  actual <- collect(pipeRDD(rev.rdd, "sort"))
+  expected <- as.list(as.character(c(5:9, 0:4)))
+  expect_equal(actual, expected)
 })
 
 test_that("join() on pairwise RDDs", {

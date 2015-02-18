@@ -2,6 +2,8 @@
 exportClasses("RDD")
 exportClasses("Broadcast")
 exportMethods(
+              "aggregateByKey",
+              "aggregateRDD",
               "cache",
               "checkpoint",
               "cogroup",
@@ -17,6 +19,8 @@ exportMethods(
               "filterRDD",
               "flatMap",
               "flatMapValues",
+              "fold",
+              "foldByKey",
               "foreach",
               "foreachPartition",
               "fullOuterJoin",
@@ -39,6 +43,7 @@ exportMethods(
               "numPartitions",
               "partitionBy",
               "persist",
+              "pipeRDD",
               "reduce",
               "reduceByKey",
               "reduceByKeyLocally",
