@@ -1,3 +1,4 @@
 textFileStream <- function(ssc, directory) {
-  DStream(callJMethod(ssc, "textFileStream", directory))
+  jRDstream <- newJObject("edu.berkeley.cs.amplab.sparkr.streaming.CallbackTest")
+#   DStream(callJMethod(ssc, "textFileStream", directory))
 }

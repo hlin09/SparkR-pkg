@@ -5,6 +5,10 @@ sparkR.streaming.init <- function(sc, batchDuration) {
         a new Spark Streaming Context\n")
     return(get(".sparkRjssc", envir = .sparkREnv))
   }
+  
+  # Start the R callback server.
+  
+  
   assign(".sparkRjssc", 
          newJObject("org.apache.spark.streaming.api.java.JavaStreamingContext", 
                     sc, 

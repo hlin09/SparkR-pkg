@@ -190,3 +190,23 @@ setMethod("foreachRDD",
             }
             invisible(collect(mapPartitions(rdd, partition.func)))
           })
+
+setGeneric("printDStream", function(dstream, num = 10) {
+  standardGeneric("printDStream") 
+})
+
+setMethod("printDStream",
+          signature(dstream = "DStream", num = "numeric"),
+          function(dstream, num = 10) {
+            func <- function(time, rdd) {
+              taken <- take(rdd, num + 1)
+              cat("-------------------------------------------\n")
+              cat("Time: ", time, "\n")
+              cat("-------------------------------------------\n")
+              cat(paste(taken[[1:num]], collapse = "\n"))
+              if (length(taken) > num) {
+                cat("...\n")
+              }
+            }
+            foreachRDD(dstream, func)
+          })
