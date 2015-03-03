@@ -110,7 +110,6 @@ setMethod("getJRDD", signature(rdd = "PipelinedRDD"),
             computeFunc <- function(split, part) {
               rdd@func(split, part)
             }
-            serializedFuncArr <- serialize("computeFunc", connection = NULL)
 
             packageNamesArr <- serialize(.sparkREnv[[".packages"]],
                                          connection = NULL)
@@ -118,16 +117,15 @@ setMethod("getJRDD", signature(rdd = "PipelinedRDD"),
             broadcastArr <- lapply(ls(.broadcastNames),
                                    function(name) { get(name, .broadcastNames) })
 
-            depsBin <- getDependencies(computeFunc)
+            serializedFuncArr <- serialize(computeFunc, connection = NULL)
 
             prev_jrdd <- rdd@prev_jrdd
 
             if (dataSerialization) {
               rddRef <- newJObject("edu.berkeley.cs.amplab.sparkr.RRDD",
                                    callJMethod(prev_jrdd, "rdd"),
-                                   serializedFuncArr,
                                    rdd@env$prev_serialized,
-                                   depsBin,
+                                   serializedFuncArr,
                                    packageNamesArr,
                                    as.character(.sparkREnv[["libname"]]),
                                    broadcastArr,
@@ -135,9 +133,8 @@ setMethod("getJRDD", signature(rdd = "PipelinedRDD"),
             } else {
               rddRef <- newJObject("edu.berkeley.cs.amplab.sparkr.StringRRDD",
                                    callJMethod(prev_jrdd, "rdd"),
-                                   serializedFuncArr,
                                    rdd@env$prev_serialized,
-                                   depsBin,
+                                   serializedFuncArr,
                                    packageNamesArr,
                                    as.character(.sparkREnv[["libname"]]),
                                    broadcastArr,
@@ -493,7 +490,7 @@ setMethod("lapply",
             func <- function(split, iterator) {
               lapply(iterator, FUN)
             }
-            PipelinedRDD(X, func)
+            lapplyPartitionsWithIndex(X, func)
           })
 
 #' @rdname lapply
@@ -610,6 +607,7 @@ setGeneric("lapplyPartitionsWithIndex", function(X, FUN) {
 setMethod("lapplyPartitionsWithIndex",
           signature(X = "RDD", FUN = "function"),
           function(X, FUN) {
+            FUN <- cleanClosure(FUN)
             closureCapturingFunc <- function(split, part) {
               FUN(split, part)
             }
@@ -1038,6 +1036,78 @@ setMethod("keyBy",
             }
             lapply(x, apply.func)
           })
+
+#' Return a new RDD that has exactly numPartitions partitions.
+#' Can increase or decrease the level of parallelism in this RDD. Internally,
+#' this uses a shuffle to redistribute data.
+#' If you are decreasing the number of partitions in this RDD, consider using
+#' coalesce, which can avoid performing a shuffle.
+#'
+#' @param x The RDD.
+#' @param numPartitions Number of partitions to create.
+#' @rdname repartition
+#' @seealso coalesce
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, list(1, 2, 3, 4, 5, 6, 7), 4L)
+#' numPartitions(rdd)                   # 4
+#' numPartitions(repartition(rdd, 2L))  # 2
+#'}
+setGeneric("repartition", function(x, numPartitions) { standardGeneric("repartition") })
+
+#' @rdname repartition
+#' @aliases repartition,RDD
+setMethod("repartition",
+          signature(x = "RDD", numPartitions = "numeric"),
+          function(x, numPartitions) {
+            coalesce(x, numPartitions, TRUE)
+          })
+
+#' Return a new RDD that is reduced into numPartitions partitions.
+#'
+#' @param x The RDD.
+#' @param numPartitions Number of partitions to create.
+#' @rdname coalesce
+#' @seealso repartition
+#' @export
+#' @examples
+#'\dontrun{
+#' sc <- sparkR.init()
+#' rdd <- parallelize(sc, list(1, 2, 3, 4, 5), 3L)
+#' numPartitions(rdd)               # 3
+#' numPartitions(coalesce(rdd, 1L)) # 1
+#'}
+setGeneric("coalesce", function(x, numPartitions, ...) { standardGeneric("coalesce") })
+
+#' @rdname coalesce
+#' @aliases coalesce,RDD
+setMethod("coalesce",
+           signature(x = "RDD", numPartitions = "numeric"),
+           function(x, numPartitions, shuffle = FALSE) {
+             if (as.integer(numPartitions) != numPartitions) {
+               warning("Number of partitions should be an integer. Coercing it to integer.")
+             }
+             numPartitions <- as.integer(numPartitions)
+             if (shuffle || numPartitions > SparkR::numPartitions(x)) {
+               func <- function(s, part) {
+                 set.seed(s)  # split as seed
+                 start <- as.integer(sample(numPartitions, 1) - 1)
+                 lapply(seq_along(part),
+                        function(i) {
+                          pos <- (start + i) %% numPartitions
+                          list(pos, part[[i]])
+                        })
+               }
+               shuffled <- lapplyPartitionsWithIndex(x, func)
+               repartitioned <- partitionBy(shuffled, numPartitions)
+               values(repartitioned)
+             } else {
+               jrdd <- callJMethod(getJRDD(x), "coalesce", numPartitions, shuffle)
+               RDD(jrdd)
+             }
+           })
 
 #' Save this RDD as a SequenceFile of serialized objects.
 #'

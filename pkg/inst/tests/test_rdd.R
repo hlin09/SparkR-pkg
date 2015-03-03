@@ -86,7 +86,10 @@ test_that("several transformations on RDD (a benchmark on PipelinedRDD)", {
                 part <- as.list(unlist(part) * split + i)
               })
   rdd2 <- lapply(rdd2, function(x) x + x)
-  collect(rdd2)
+  actual <- collect(rdd2)
+  expected <- list(24, 24, 24, 24, 24, 
+                   168, 170, 172, 174, 176)
+  expect_equal(actual, expected)
 })
 
 test_that("PipelinedRDD support actions: cache(), persist(), unpersist(), checkpoint()", {
@@ -265,6 +268,27 @@ test_that("keyBy on RDDs", {
   keys <- keyBy(rdd, func)
   actual <- collect(keys)
   expect_equal(actual, lapply(nums, function(x) { list(func(x), x) }))
+})
+
+test_that("repartition/coalesce on RDDs", {
+  rdd <- parallelize(sc, 1:20, 4L) # each partition contains 5 elements
+
+  # repartition
+  r1 <- repartition(rdd, 2)
+  expect_equal(numPartitions(r1), 2L)
+  count <- length(collectPartition(r1, 0L))
+  expect_true(count >= 8 && count <= 12)
+
+  r2 <- repartition(rdd, 6)
+  expect_equal(numPartitions(r2), 6L)
+  count <- length(collectPartition(r2, 0L))
+  expect_true(count >=0 && count <= 4)
+
+  # coalesce
+  r3 <- coalesce(rdd, 1)
+  expect_equal(numPartitions(r3), 1L)
+  count <- length(collectPartition(r3, 0L))
+  expect_equal(count, 20)
 })
 
 test_that("sortBy() on RDDs", {
