@@ -7,7 +7,17 @@ sparkR.streaming.init <- function(sc, batchDuration) {
   }
   
   # Start the R callback server.
-  
+  cmd <- "Rscript"
+  args <- paste("--vanilla ", 
+                .sparkREnv$libname, "/SparkR/callback/streaming-callback.R", 
+                sep="")
+  env.vars <- c(paste("BACKEND_PORT=", .sparkREnv$sparkRBackendPort, sep=""), 
+                paste("SPARKDR_RLIBDIR=", .sparkREnv$libname, sep=""),
+                paste("CALLBACK_PORT=", 54321L, sep=""))
+  cat("Starting the callback server: ", cmd, args, "\n")
+  system2(cmd, args, env = env.vars, wait = FALSE)
+  Sys.sleep(2)
+  SparkR:::callJStatic("SparkRHandler", "connectCallback")
   
   assign(".sparkRjssc", 
          newJObject("org.apache.spark.streaming.api.java.JavaStreamingContext", 
@@ -18,16 +28,4 @@ sparkR.streaming.init <- function(sc, batchDuration) {
   )
   ssc <- get(".sparkRjssc", envir = .sparkREnv)
   ssc
-}
-
-startStreaming <- function(ssc) {
-  callJMethod(ssc, "start")
-}
-
-awaitTermination <- function(ssc, timeout) {
-  if (missing(timeout)) {
-    callJMethod(ssc, "awaitTermination")
-  } else {
-    callJMethod(ssc, "awaitTermination", as.integer(timeout * 1000))
-  }
 }

@@ -174,28 +174,26 @@ setValidity("DStream",
 #'\dontrun{
 #' sc <- sparkR.init()
 #' rdd <- parallelize(sc, 1:10)
-#' foreachRDD(rdd, function(x) { save(x, file=...) })
+#' foreachRDD(dstream, function(x) { save(x, file=...) })
 #'}
 setGeneric("foreachRDD", 
-           function(dstream, rdd, func) { standardGeneric("foreachRDD") })
+           function(dstream, func) { standardGeneric("foreachRDD") })
 
 #' @rdname foreachRDD
-#' @aliases foreach,RDD,function-method
+#' @aliases foreach,DStream,function-method
 setMethod("foreachRDD",
-          signature(dstream = "DStream", rdd = "RDD", func = "function"),
-          function(rdd, func) {
-            partition.func <- function(x) {
-              lapply(x, func)
-              NULL
-            }
-            invisible(collect(mapPartitions(rdd, partition.func)))
+          signature(dstream = "DStream", func = "function"),
+          function(dstream, func) {
+            callJStatic("edu.berkeley.cs.amplab.sparkr.streaming.RDStream", 
+                        "callForeachRDD", 
+                        dstream@jds, serialize(func, connection = NULL))
           })
 
-setGeneric("printDStream", function(dstream, num = 10) {
-  standardGeneric("printDStream") 
+setGeneric("print", function(dstream, num = 10) {
+  standardGeneric("print") 
 })
 
-setMethod("printDStream",
+setMethod("print",
           signature(dstream = "DStream", num = "numeric"),
           function(dstream, num = 10) {
             func <- function(time, rdd) {
@@ -203,7 +201,7 @@ setMethod("printDStream",
               cat("-------------------------------------------\n")
               cat("Time: ", time, "\n")
               cat("-------------------------------------------\n")
-              cat(paste(taken[[1:num]], collapse = "\n"))
+              cat(paste(taken[1:num], collapse = "\n"))
               if (length(taken) > num) {
                 cat("...\n")
               }

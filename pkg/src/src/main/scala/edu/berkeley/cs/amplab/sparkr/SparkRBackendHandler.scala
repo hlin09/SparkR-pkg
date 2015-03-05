@@ -6,6 +6,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.net.Socket
 
 import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.ChannelHandlerContext
@@ -54,6 +55,18 @@ class SparkRBackendHandler(server: SparkRBackend) extends SimpleChannelInboundHa
               e.printStackTrace()
               writeInt(dos, -1)
           }
+        case "connectCallback" =>
+          println("Connecting to a callback server.")
+          JVMObjectTracker.callbackSocket = new Socket("localhost", 54321)
+          writeInt(dos, 0)
+          writeType(dos, "void")
+        case "sendsomething" =>
+          val sos = JVMObjectTracker.callbackSocket.getOutputStream()
+          val dos2 = new DataOutputStream(sos)
+          writeString(dos2, "test")
+          dos2.flush()
+          writeInt(dos, 0)
+          writeType(dos, "void")
         case _ => dos.writeInt(-1)
       }
     } else {
@@ -181,6 +194,10 @@ object JVMObjectTracker {
   // TODO: We support only one connection now, so an integer is fine.
   // Investiage using use atomic integer in the future.
   var objCounter: Int = 0
+  
+  // Channel to callback server.
+//  var callbackChannel: Channel = null
+  var callbackSocket: Socket = null
 
   def getObject(id: String): Object = {
     objMap(id)

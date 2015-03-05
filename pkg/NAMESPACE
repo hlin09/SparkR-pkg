@@ -76,6 +76,23 @@ export(
        "setBroadcastValue",
        "setCheckpointDir"
       )
+
+# Streaming methods exported
+exportClasses(
+                "DStream"
+               )
+exportMethods(
+              "foreachRDD",
+              "print"
+             )
+
+# S3 streaming methods exported
+export(
+       "textFileStream",
+       "startStreaming",
+       "awaitTermination"
+      )
+
 export("sparkR.init")
 export("sparkR.streaming.init")
 export("sparkR.stop")

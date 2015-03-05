@@ -71,6 +71,7 @@ writeType <- function(con, class) {
                  list = "l",
                  jobj = "j",
                  environment = "e",
+                 "NULL" = "n",
                  stop("Unsupported type for serialization"))
   writeBin(charToRaw(type), con)
 }

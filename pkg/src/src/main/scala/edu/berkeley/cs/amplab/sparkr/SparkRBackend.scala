@@ -15,6 +15,8 @@ import io.netty.handler.codec.bytes.ByteArrayDecoder
 import io.netty.handler.codec.bytes.ByteArrayEncoder
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder
 
+import edu.berkeley.cs.amplab.sparkr.SerDe._
+
 /**
  * Netty-based backend server that is used to communicate between R and Java.
  */
@@ -71,6 +73,16 @@ class SparkRBackend {
       bootstrap.childGroup().shutdownGracefully()
     }
     bootstrap = null
+    
+    // Send close to R callback server.
+    if (JVMObjectTracker.callbackSocket != null && 
+        JVMObjectTracker.callbackSocket.isConnected()) {
+      try {
+        val dos = new DataOutputStream(JVMObjectTracker.callbackSocket.getOutputStream())
+        writeString(dos, "close")
+        JVMObjectTracker.callbackSocket.close()
+      }
+    }
   }
 
 }
