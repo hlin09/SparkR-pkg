@@ -65,6 +65,7 @@ if (isEmpty != 0) {
     } else {
       SparkR:::writeStrings(outputCon, output)
     }
+    writeEnd <- proc.time()[3]
   } else {
     if (isInputSerialized) {
       # Now read as many characters as described in funcLen
@@ -73,6 +74,7 @@ if (isEmpty != 0) {
       data <- readLines(inputCon)
     }
 
+    dataReadEnd <- proc.time()[3]
     res <- new.env()
 
     # Step 1: hash the data to an environment
@@ -90,6 +92,8 @@ if (isEmpty != 0) {
     }
     invisible(lapply(data, hashTupleToEnvir))
 
+    computeEnd <- proc.time()[3]
+
     # Step 2: write out all of the environment as key-value pairs.
     for (name in ls(res)) {
       SparkR:::writeInt(outputCon, 2L)
@@ -98,6 +102,7 @@ if (isEmpty != 0) {
       length(res[[name]]$data) <- res[[name]]$counter
       SparkR:::writeRawSerialize(outputCon, res[[name]]$data)
     }
+    writeEnd <- proc.time()[3]
   }
 }
 
