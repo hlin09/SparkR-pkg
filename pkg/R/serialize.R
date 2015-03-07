@@ -16,20 +16,24 @@ writeObject <- function(con, object, writeType = TRUE) {
   # NOTE: In R vectors have same type as objects. So we don't support
   # passing in vectors as arrays and instead require arrays to be passed
   # as lists.
-  if (writeType) {
+  if (is.null(object)) {
     writeType(con, class(object))
+  } else {
+    if (writeType) {
+      writeType(con, class(object))
+    }
+    switch(class(object),
+           integer = writeInt(con, object),
+           character = writeString(con, object),
+           logical = writeBoolean(con, object),
+           double = writeDouble(con, object),
+           numeric = writeDouble(con, object),
+           raw = writeRaw(con, object),
+           list = writeList(con, object),
+           jobj = writeString(con, object$id),
+           environment = writeEnv(con, object),
+           stop(paste("Unsupported type for serialization", class(object))))
   }
-  switch(class(object),
-         integer = writeInt(con, object),
-         character = writeString(con, object),
-         logical = writeBoolean(con, object),
-         double = writeDouble(con, object),
-         numeric = writeDouble(con, object),
-         raw = writeRaw(con, object),
-         list = writeList(con, object),
-         jobj = writeString(con, object$id),
-         environment = writeEnv(con, object),
-         stop("Unsupported type for serialization"))
 }
 
 writeString <- function(con, value) {
@@ -72,7 +76,7 @@ writeType <- function(con, class) {
                  jobj = "j",
                  environment = "e",
                  "NULL" = "n",
-                 stop("Unsupported type for serialization"))
+                 stop(paste("Unsupported type for serialization:", class)))
   writeBin(charToRaw(type), con)
 }
 

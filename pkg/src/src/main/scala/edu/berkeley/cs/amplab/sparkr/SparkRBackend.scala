@@ -76,8 +76,9 @@ class SparkRBackend {
     
     // Send close to R callback server.
     if (JVMObjectTracker.callbackSocket != null && 
-        JVMObjectTracker.callbackSocket.isConnected()) {
+        !JVMObjectTracker.callbackSocket.isClosed()) {
       try {
+        println("Requesting to close a call back server.")
         val dos = new DataOutputStream(JVMObjectTracker.callbackSocket.getOutputStream())
         writeString(dos, "close")
         JVMObjectTracker.callbackSocket.close()

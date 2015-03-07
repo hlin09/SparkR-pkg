@@ -78,24 +78,27 @@ export(
       )
 
 # Streaming methods exported
-exportClasses(
-                "DStream"
-               )
+exportClasses("DStream")
+
 exportMethods(
               "foreachRDD",
-              "print"
+              "print",
+              "transform"
              )
 
 # S3 streaming methods exported
 export(
        "textFileStream",
+       "queueStream",
        "startStreaming",
-       "awaitTermination"
+       "awaitTermination",
+       "mapPartitionsWithIndex"
       )
 
 export("sparkR.init")
 export("sparkR.streaming.init")
 export("sparkR.stop")
+export("sparkR.streaming.stop")
 export("print.jobj")
 useDynLib(SparkR, stringHashCode)
 importFrom(methods, setGeneric, setMethod, setOldClass)

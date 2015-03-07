@@ -12,6 +12,9 @@ import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.SimpleChannelInboundHandler
 
+import org.apache.spark.streaming._
+import org.apache.spark.streaming.api.java._
+
 import edu.berkeley.cs.amplab.sparkr.SerDe._
 
 /**
@@ -60,6 +63,17 @@ class SparkRBackendHandler(server: SparkRBackend) extends SimpleChannelInboundHa
           JVMObjectTracker.callbackSocket = new Socket("localhost", 54321)
           writeInt(dos, 0)
           writeType(dos, "void")
+        case "closeCallback" =>
+          // Send close to R callback server.
+          if (JVMObjectTracker.callbackSocket != null &&
+              JVMObjectTracker.callbackSocket.isConnected()) {
+            try {
+              println("Requesting to close a call back server.")
+              val dos = new DataOutputStream(JVMObjectTracker.callbackSocket.getOutputStream())
+              writeString(dos, "close")
+              JVMObjectTracker.callbackSocket.close()
+            }
+          }
         case "sendsomething" =>
           val sos = JVMObjectTracker.callbackSocket.getOutputStream()
           val dos2 = new DataOutputStream(sos)
@@ -129,6 +143,9 @@ class SparkRBackendHandler(server: SparkRBackend) extends SimpleChannelInboundHa
         }.head
 
         val obj = ctor.newInstance(args:_*)
+        if (objId.equals("org.apache.spark.streaming.api.java.JavaStreamingContext")) {
+          JVMObjectTracker.streamingContext = obj.asInstanceOf[JavaStreamingContext].ssc
+        }
 
         writeInt(dos, 0)
         writeObject(dos, obj.asInstanceOf[AnyRef])
@@ -196,8 +213,9 @@ object JVMObjectTracker {
   var objCounter: Int = 0
   
   // Channel to callback server.
-//  var callbackChannel: Channel = null
   var callbackSocket: Socket = null
+  // Streaming Context
+  var streamingContext: StreamingContext = null
 
   def getObject(id: String): Object = {
     objMap(id)

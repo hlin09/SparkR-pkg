@@ -617,8 +617,8 @@ setMethod("lapplyPartitionsWithIndex",
 
 #' @rdname lapplyPartitionsWithIndex
 #' @export
-setGeneric("mapPartitionsWithIndex", function(X, FUN) {
-           standardGeneric("mapPartitionsWithIndex") })
+# setGeneric("mapPartitionsWithIndex", function(X, FUN) {
+#            standardGeneric("mapPartitionsWithIndex") })
 
 #' @rdname lapplyPartitionsWithIndex
 #' @aliases mapPartitionsWithIndex,RDD,function-method

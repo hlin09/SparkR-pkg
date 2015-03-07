@@ -64,6 +64,23 @@ convertJListToRList <- function(jList, flatten, logicalUpperBound = NULL, serial
   }
 }
 
+# Given an R list, returns an java.util.ArrayList containing the same elements, 
+# the number of which is optionally upper bounded by `logicalUpperBound` 
+# (by default, return all elements). 
+convertRListToJList <- function(rList, logicalUpperBound) {
+  listSize <- length(rList)
+  if (!missing(logicalUpperBound)) {
+    listSize <- min(listSize, as.integer(logicalUpperBound))
+  }
+  res <- newJObject("java.util.ArrayList")
+  if (listSize > 0) {
+    for (i in 1:listSize) {
+      callJMethod(res, "add", rList[[i]])
+    }
+  }
+  res
+}
+
 # Returns TRUE if `name` refers to an RDD in the given environment `env`
 isRDD <- function(name, env) {
   obj <- get(name, envir = env)

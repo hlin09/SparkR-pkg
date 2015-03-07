@@ -1,12 +1,74 @@
+#' Creates an input stream that monitors a Hadoop-compatible file system
+#' for new files and reads them as text files. Files must be wrriten to the
+#' monitored directory by "moving" them from another location within the same
+#' file system. File names starting with . are ignored.
+#'
+#' @param ssc Spark StreamingContext (Java API) to use.
+#' @param directory A character vector of the directory path to monitor.
+#' @return A DStream where each item is of type \code{character}
+#' @export
+#' @examples
+#'\dontrun{
+#'  sc <- sparkR.init()
+#'  ssc <- sparkR.streaming.init(sc, 1L)
+#'  textStream <- textFileStream(ssc, "directory/")
+#'}
 textFileStream <- function(ssc, directory) {
 #   jRDstream <- newJObject("edu.berkeley.cs.amplab.sparkr.streaming.CallbackTest")
-  DStream(callJMethod(ssc, "textFileStream", directory))
+  DStream(callJMethod(ssc, "textFileStream", directory), FALSE)
 }
 
+#' Creates an input stream from an queue of RDDs or list. In each batch,
+#' it will process either one or all of the RDDs returned by the queue.
+#' 
+#' NOTE: changes to the queue after the stream is created will not be recognized.
+#' 
+#' @param rdds A list of RDDs.
+#' @param oneAtATime A logical indicating if picking one rdd each time or 
+#' picking all of them once.
+#' @param default The default rdd if no more in rdds.
+#' @return A DStream consisting of the queue of the given rdds.
+#' @export
+#' @examples
+#'\dontrun{
+#'  sc <- sparkR.init()
+#'  ssc <- sparkR.streaming.init(sc, 1L)
+#'  dstream <- queueStream(ssc, "directory/")
+#'}
+queueStream <- function(ssc, rdds = list(), oneAtATime = TRUE, default = NULL) {
+  if (!is.null(default) && !inherits(default, "RDD")) {
+    default <- parallelize(sc, default)@jrdd
+  }
+  jrdds <- lapply(rdds, function(rdd) {
+    if (!inherits(rdd, "RDD")) {
+      rdd <- parallelize(sc, rdd)
+    }
+    rdd@jrdd
+  })
+  jrdds <- convertRListToJList(jrdds)
+  jqueue <- callJStatic("edu.berkeley.cs.amplab.sparkr.streaming.RDStream", 
+                        "toRDDQueue", jrdds)
+  if (is.null(default)) {
+    jdstream <- callJMethod(ssc, "queueStream", jqueue, oneAtATime)
+  } else {
+    jdstream <- callJMethod(ssc, "queueStream", jqueue, oneAtATime, default)
+  }  
+  DStream(jdstream)
+}
+
+#' Start the execution of the DStream.
+#'
+#' @param ssc The Java streaming context.
+#' @export
 startStreaming <- function(ssc) {
   callJMethod(ssc, "start")
 }
 
+#' Wait for the execution to stop.
+#' 
+#' @param ssc The Java streaming context.
+#' @param timeout time to wait in seconds.
+#' @export
 awaitTermination <- function(ssc, timeout) {
   if (missing(timeout)) {
     callJMethod(ssc, "awaitTermination")

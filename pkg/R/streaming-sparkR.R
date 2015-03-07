@@ -29,3 +29,14 @@ sparkR.streaming.init <- function(sc, batchDuration) {
   ssc <- get(".sparkRjssc", envir = .sparkREnv)
   ssc
 }
+
+# Stop the Spark streaming context.
+# Also terminates the callback server that the JVM backend is connected to.
+sparkR.streaming.stop <- function(ssc, stopSparkContext = TRUE, 
+                                  stopGracefully = FALSE) {
+  callJMethod(ssc, "stop", stopSparkContext, stopGracefully)
+  SparkR:::callJStatic("SparkRHandler", "closeCallback")
+  if (stopSparkContext) {
+    SparkR::sparkR.stop()
+  }
+}
