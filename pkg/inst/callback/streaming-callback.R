@@ -37,7 +37,7 @@ while (TRUE) {
       rrdd <- SparkR:::RDD(jrdd)
       res <- func(time, rrdd)
       if (inherits(res, "RDD")) {
-        SparkR:::writeObject(serverCon, res$jrdd)
+        SparkR:::writeObject(serverCon, SparkR:::getJRDD(res))
       } else {
         SparkR:::writeType(serverCon, "NULL")
       }

@@ -46,11 +46,11 @@ setMethod("initialize", "TransformedDStream", function(.Object, prev, func,
   .Object@env$isCached <- FALSE
   .Object@env$isCheckpointed <- FALSE
   .Object@env$jdstream_val <- jdstream_val
-  # This tracks if jrdd_val is serialized
+  # This tracks if jdstream_val is serialized
   .Object@env$serialized <- prev@env$serialized
   
-  # NOTE: We use prev_serialized to track if prev_jrdd is serialized
-  # prev_serialized is used during the delayed computation of JRDD in getJRDD
+  # NOTE: We use prev_serialized to track if prev_jdstream is serialized
+  # prev_serialized is used during the delayed computation of JDStream in getJDStream.
   .Object@prev <- prev
   
   isPipelinable <- function(dstream) {
@@ -66,12 +66,12 @@ setMethod("initialize", "TransformedDStream", function(.Object, prev, func,
     # is same as serialized here.
     .Object@env$prev_serialized <- .Object@env$serialized
   } else {
-    pipelinedFunc <- function(split, iterator) {
-      func(split, prev@func(split, iterator))
+    pipelinedFunc <- function(time, rdds) {
+      func(time, prev@func(time, rdds))
     }
     .Object@func <- pipelinedFunc
     .Object@prev_jdstream <- prev@prev_jdstream # maintain the pipeline
-    # Get if the prev_jrdd was serialized from the parent RDD
+    # Get if the prev_jdstream was serialized from the parent DStream.
     .Object@env$prev_serialized <- prev@env$prev_serialized
   }
   
@@ -94,7 +94,7 @@ TransformedDStream <- function(prev, func) {
   new("TransformedDStream", prev, func, NULL)
 }
 
-# The jrdd accessor function.
+# The jdstream accessor function.
 setGeneric("getJDStream", function(dstream, ...) { standardGeneric("getJDStream") })
 setMethod("getJDStream", signature(dstream = "DStream"), function(dstream) dstream@jdstream )
 setMethod("getJDStream", signature(dstream = "TransformedDStream"),
@@ -105,43 +105,40 @@ setMethod("getJDStream", signature(dstream = "TransformedDStream"),
             
             # TODO: This is to handle anonymous functions. Find out a
             # better way to do this.
-            computeFunc <- function(split, part) {
-              dstream@func(split, part)
+            computeFunc <- function(time, rdd) {
+              dstream@func(time, rdd)
             }
-            serializedFuncArr <- serialize("computeFunc", connection = NULL,
-                                           ascii = TRUE)
             
             packageNamesArr <- serialize(.sparkREnv[[".packages"]],
-                                         connection = NULL,
-                                         ascii = TRUE)
+                                         connection = NULL)
             
-            depsBin <- getDependencies(computeFunc)
+            serializedFuncArr <- serialize(computeFunc, connection = NULL)
             
-            prev_jrdd <- dstream@prev_jrdd
+            prev_jdstream <- dstream@prev_jdstream
             
             if (dataSerialization) {
-              dstreamRef <- newJObject("edu.berkeley.cs.amplab.sparkr.RDStream",
-                                   callJMethod(prev_jdstream, "dstream"),
-                                   serializedFuncArr,
-                                   dstream@env$prev_serialized,
-                                   depsBin,
-                                   packageNamesArr,
-                                   as.character(.sparkREnv[["libname"]]),
-                                   callJMethod(prev_jdstream, "classTag"))
+              dstreamRef <- newJObject("edu.berkeley.cs.amplab.sparkr.streaming.RDStream",
+                                       callJMethod(prev_jdstream, "dstream"),
+#                                        dstream@env$prev_serialized,
+                                       serializedFuncArr
+#                                        packageNamesArr,
+#                                        as.character(.sparkREnv[["libname"]]),
+#                                        callJMethod(prev_jdstream, "classTag")
+)
             } else {
               dstreamRef <- newJObject("edu.berkeley.cs.amplab.sparkr.StringRRDD",
                                    callJMethod(prev_jdstream, "dstream"),
-                                   serializedFuncArr,
                                    dstream@env$prev_serialized,
-                                   depsBin,
+                                   serializedFuncArr,
                                    packageNamesArr,
                                    as.character(.sparkREnv[["libname"]]),
+                                   broadcastArr,
                                    callJMethod(prev_jdstream, "classTag"))
             }
-            # Save the serialization flag after we create a RRDD
+            # Save the serialization flag after we create a RDStream.
             dstream@env$serialized <- dataSerialization
             # dstreamRef$asJavaDStream()
-            dstream@env$jdstream_val <- callJMethod(dstreamRef, "asJavaDStream")
+            dstream@env$jdstream_val <- callJMethod(dstreamRef, "asJavaDStream") 
             dstream@env$jdstream_val
           })
 
@@ -173,10 +170,10 @@ setValidity("DStream",
 #' @examples
 #'\dontrun{
 #' sc <- sparkR.init()
-#' rdd <- parallelize(sc, 1:10, 5L)
+#' ssc <- sparkR.init.streaming(sc, 2L)
+#' dstream <- queueStream(ssc, list(1:10))
 #' prod <- mapPartitionsWithIndex(rdd, function(split, part) {
 #'                                          split * Reduce("+", part) })
-#' collect(prod, flatten = FALSE) # 0, 7, 22, 45, 76
 #'}
 # setGeneric("mapPartitionsWithIndex", function(X, FUN) {
 #   standardGeneric("mapPartitionsWithIndex") })
@@ -186,6 +183,7 @@ setValidity("DStream",
 setMethod("mapPartitionsWithIndex",
           signature(X = "DStream", FUN = "function"),
           function(X, FUN) {
+            FUN <- cleanClosure(FUN)
             transform(X, function(rdd) {
               mapPartitionsWithIndex(rdd, FUN)
             })
@@ -229,7 +227,8 @@ setMethod("foreachRDD",
             invisible(
               callJStatic("edu.berkeley.cs.amplab.sparkr.streaming.RDStream", 
                           "callForeachRDD", 
-                          dstream@jdstream, serialize(func, connection = NULL))
+                          getJDStream(dstream), 
+                          serialize(func, connection = NULL))
             )
           })
 
@@ -237,7 +236,7 @@ setMethod("foreachRDD",
 #' 
 #' @param num The number of elements from the first will be printed.
 #' @export
-#' @rdname foreachRDD
+#' @rdname print
 #' @examples
 #'\dontrun{
 #' sc <- sparkR.init()
@@ -245,15 +244,11 @@ setMethod("foreachRDD",
 #' dstream <- queueStream(ssc, list(1:10))
 #' print(dstream, 10L)
 #'}
-setGeneric("print", function(dstream, num = 10) {
-  standardGeneric("print") 
-})
-
 #' @rdname print
 #' @aliases print,DStream-method
 setMethod("print",
-          signature(dstream = "DStream", num = "numeric"),
-          function(dstream, num = 10) {
+          signature(x = "DStream"),
+          function(x, num = 10) {
             func <- function(time, rdd) {
               taken <- take(rdd, num + 1)
               cat("-------------------------------------------\n")
@@ -264,9 +259,11 @@ setMethod("print",
               }
               if (length(taken) > num) {
                 cat("...\n")
+              } else {
+                cat("\n")
               }
             }
-            foreachRDD(dstream, func)
+            foreachRDD(x, func)
           })
 
 #' Return a new DStream in which each RDD is generated by applying a function
@@ -281,8 +278,9 @@ setMethod("print",
 #' @examples
 #'\dontrun{
 #' sc <- sparkR.init()
-#' rdd <- parallelize(sc, 1:10)
-#' transform(dstream, function(x) { save(x, file=...) })
+#' ssc <- sparkR.init.streaming(sc, 2L)
+#' dstream <- queueStream(ssc, list(1:10))
+#' transform(dstream, function(t, rdd) { ... })
 #'}
 setGeneric("transform", 
            function(dstream, func) { standardGeneric("transform") })
