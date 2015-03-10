@@ -29,21 +29,16 @@ object RDStream {
   
   def callRTransform(rdd: RDD[_], time: Time, rfunc: Array[Byte]): Option[RDD[Array[Byte]]] = {
     try {
-      if (JVMObjectTracker.callbackSocket != null && 
-          JVMObjectTracker.callbackSocket.isConnected) {
-        val bos = new ByteArrayOutputStream()
-        val dos = new DataOutputStream(JVMObjectTracker.callbackSocket.getOutputStream())
-        val dis = new DataInputStream(JVMObjectTracker.callbackSocket.getInputStream())
-        
-        writeString(dos, "callback")
-        writeObject(dos, JavaRDD.fromRDD(rdd).asInstanceOf[AnyRef])
-        writeDouble(dos, time.milliseconds.toDouble)
-        writeBytes(dos, rfunc)
-        dos.flush()
-        Option(readObject(dis).asInstanceOf[JavaRDD[Array[Byte]]]).map(_.rdd)
-      } else {
-        None
-      }      
+      val bos = new ByteArrayOutputStream()
+      val dos = new DataOutputStream(JVMObjectTracker.callbackSocket.getOutputStream())
+      val dis = new DataInputStream(JVMObjectTracker.callbackSocket.getInputStream())
+      
+      writeString(dos, "callback")
+      writeObject(dos, JavaRDD.fromRDD(rdd).asInstanceOf[AnyRef])
+      writeDouble(dos, time.milliseconds.toDouble)
+      writeBytes(dos, rfunc)
+      dos.flush()
+      Option(readObject(dis).asInstanceOf[JavaRDD[Array[Byte]]]).map(_.rdd)    
     } catch {
       case e: Exception =>
         JVMObjectTracker.callbackSocket.close()
