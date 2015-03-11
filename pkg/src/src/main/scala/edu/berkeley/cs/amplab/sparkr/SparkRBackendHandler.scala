@@ -69,10 +69,12 @@ class SparkRBackendHandler(server: SparkRBackend) extends SimpleChannelInboundHa
               JVMObjectTracker.callbackSocket.isConnected()) {
             try {
               println("Requesting to close a call back server.")
-              val dos = new DataOutputStream(JVMObjectTracker.callbackSocket.getOutputStream())
-              writeString(dos, "close")
+              val os = new DataOutputStream(JVMObjectTracker.callbackSocket.getOutputStream())
+              writeString(os, "close")
               JVMObjectTracker.callbackSocket.close()
             }
+            writeInt(dos, 0)
+            writeType(dos, "void")
           }
         case "sendsomething" =>
           val sos = JVMObjectTracker.callbackSocket.getOutputStream()

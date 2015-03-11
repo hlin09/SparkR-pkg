@@ -274,7 +274,6 @@ setMethod("print",
 #' or have two arguments of (`time`, `rdd`).
 #' @return a new transformed DStream.
 #' @export
-#' @rdname transform
 #' @examples
 #'\dontrun{
 #' sc <- sparkR.init()
@@ -282,19 +281,28 @@ setMethod("print",
 #' dstream <- queueStream(ssc, list(1:10))
 #' transform(dstream, function(t, rdd) { ... })
 #'}
-setGeneric("transform", 
-           function(dstream, func) { standardGeneric("transform") })
-
 #' @rdname transform
 #' @aliases transform,DStream,function-method
-setMethod("transform",
-          signature(dstream = "DStream", func = "function"),
-          function(dstream, func) {
-            if (length(as.list(args(func))) - 1 == 1) {  # "func" has only one param.
-              oldFunc <- func
-              func <- function(time, rdd) {
-                oldFunc(rdd)
-              }
-            }
-            TransformedDStream(dstream, func)
-          })
+transform <- function(`_data`, ...) { UseMethod("transform", `_data`) }
+transform.default <- base::transform
+transform.DStream <- function(`_data`, func) {
+  if (length(as.list(args(func))) - 1 == 1) {  # "func" has only one param.
+    oldFunc <- func
+    func <- function(time, rdd) {
+      oldFunc(rdd)
+    }
+  }
+  TransformedDStream(`_data`, func)
+}
+
+# setMethod("transform",
+#           signature(dstream = "DStream", func = "function"),
+#           function(dstream, func) {
+#             if (length(as.list(args(func))) - 1 == 1) {  # "func" has only one param.
+#               oldFunc <- func
+#               func <- function(time, rdd) {
+#                 oldFunc(rdd)
+#               }
+#             }
+#             TransformedDStream(dstream, func)
+#           })

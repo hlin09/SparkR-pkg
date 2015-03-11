@@ -7,6 +7,7 @@
 # logical -> Boolean
 # double, numeric -> Double
 # raw -> Array[Byte]
+# null -> NULL
 #
 # list[T] -> Array[T], where T is one of above mentioned types
 # environment -> Map[String, T], where T is a native type

@@ -36,7 +36,6 @@ while (TRUE) {
       func <- unserialize(SparkR:::readRaw(serverCon))
       rrdd <- SparkR:::RDD(jrdd)
       res <- func(time, rrdd)
-      cat("class: ", class(res), "\n")
       if (inherits(res, "RDD")) {
         SparkR:::writeObject(serverCon, SparkR:::getJRDD(res))
       } else {

@@ -41,8 +41,7 @@ object RDStream {
       Option(readObject(dis).asInstanceOf[JavaRDD[Array[Byte]]]).map(_.rdd)    
     } catch {
       case e: Exception =>
-        JVMObjectTracker.callbackSocket.close()
-        JVMObjectTracker.callbackSocket = null
+//        JVMObjectTracker.callbackSocket.close()
         System.err.println("R Callback failed with " + e)
         e.printStackTrace()
         None

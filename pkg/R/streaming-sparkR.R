@@ -35,8 +35,9 @@ sparkR.streaming.init <- function(sc, batchDuration) {
 sparkR.streaming.stop <- function(ssc, stopSparkContext = TRUE, 
                                   stopGracefully = FALSE) {
   callJMethod(ssc, "stop", stopSparkContext, stopGracefully)
-  SparkR:::callJStatic("SparkRHandler", "closeCallback")
   if (stopSparkContext) {
     SparkR::sparkR.stop()
+  } else {
+    callJStatic("SparkRHandler", "closeCallback")
   }
 }

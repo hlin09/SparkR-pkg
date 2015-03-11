@@ -1,11 +1,22 @@
 context("SparkR streaming tests")
 
+# Streaming context related.
 timeout <- 10
 duration <- 1L
-# JavaSparkContext handle
 sc <- sparkR.init()
-ssc <- sparkR.init.stream(sc, duration)
+ssc <- sparkR.streaming.init(sc, duration)
 
+# Data
+nums1 <- 1:10
+rdd1 <- parallelize(sc, nums1, 2L)
+
+nums2 <- 11:20
+rdd2 <- parallelize(sc, nums2, 2L)
+
+intPairs <- list(list(1L, -1), list(2L, 100), list(2L, 1), list(1L, 200))
+intRdd <- parallelize(sc, intPairs, 2L)
+
+# Helper functions.
 .waitFor <- function(res, num) {
   start.time <- proc.time()
   while (res$size < num && (proc.time() - start.time)["elapsed"] < timeout) {
@@ -16,19 +27,28 @@ ssc <- sparkR.init.stream(sc, duration)
   }
 }
 
-.collectStream <- function(dstream, num, ) {
-  res <- initAccumulator()
+.collectStream <- function(dstream, num) {
+  res <- SparkR:::initAccumulator()
   getOutput <- function(time, rdd) {
     if (res$size < num) {
-      addToAccumulator(res, collect(rdd))
+      SparkR:::addItemToAccumulator(res, collect(rdd))
     }
   }
   foreachRDD(dstream, getOutput)
-  startStream(ssc)
+  startStreaming(ssc)
   .waitFor(res, num)
-  res
+  res$data
 }
 
-test_that("", {
-  
+test_that("mapPartitionsWithIndex on DStream", {
+  inputStream <- queueStream(ssc, list(rdd1, rdd2))
+  mappedStream <- mapPartitionsWithIndex(inputStream, 
+                                         function(split, part) {
+                                           split + Reduce("+", part)
+                                         })
+  expected <- list(list(15, 41), list(39, 55))
+  actual <- .collectStream(mappedStream, 2)
+  expect_equal(actual, expected)
 })
+
+sparkR.streaming.stop(ssc)

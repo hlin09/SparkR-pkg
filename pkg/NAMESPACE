@@ -84,8 +84,7 @@ exportClasses("DStream")
 
 exportMethods(
               "foreachRDD",
-              "print",
-              "transform"
+              "print"
              )
 
 # S3 streaming methods exported
@@ -94,7 +93,8 @@ export(
        "queueStream",
        "startStreaming",
        "awaitTermination",
-       "mapPartitionsWithIndex"
+       "mapPartitionsWithIndex",
+       "transform"
       )
 
 export("sparkR.init")
