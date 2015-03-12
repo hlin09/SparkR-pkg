@@ -44,7 +44,7 @@ object SerDe {
       case 'l' => readList(dis)
       case 'j' => JVMObjectTracker.getObject(readString(dis))
       case 'n' => null
-      case _ => throw new IllegalArgumentException(s"Invalid type $dataType")
+      case _ => throw new IllegalArgumentException(s"Invalid type $dataType.")
     }
   }
 
