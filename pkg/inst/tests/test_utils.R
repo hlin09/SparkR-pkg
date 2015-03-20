@@ -89,12 +89,15 @@ test_that("cleanClosure on R functions", {
   
   # Test for function (and variable) definitions.
   f <- function(x) {
+    privateCallRes <- unlist(convertJListToRList(x))  # Call package private functions.
     g <- function(y) { y * 2 }
-    g(x)
+    g(privateCallRes)
   }
   newF <- cleanClosure(f)
   env <- environment(newF)
-  expect_equal(length(ls(env)), 0)  # "y" and "g" should not be included.
+  expect_equal(ls(env), "convertJListToRList")  # Only "convertJListToRList". No "y" or "g".
+  actual <- get("convertJListToRList", envir = env, inherits = FALSE)
+  expect_equal(actual, convertJListToRList)
   
   # Test for overriding variables in base namespace (Issue: SparkR-196).
   nums <- as.list(1:10)
@@ -113,7 +116,7 @@ test_that("cleanClosure on R functions", {
   a <- matrix(nrow=10, ncol=10, data=rnorm(100))
   aBroadcast <- broadcast(sc, a)
   normMultiply <- function(x) { norm(aBroadcast$value) * x }
-  newnormMultiply <- SparkR:::cleanClosure(normMultiply)
+  newnormMultiply <- cleanClosure(normMultiply)
   env <- environment(newnormMultiply)
   expect_equal(ls(env), "aBroadcast")
   expect_equal(get("aBroadcast", envir = env, inherits = FALSE), aBroadcast)
