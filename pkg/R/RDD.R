@@ -123,17 +123,13 @@ setMethod("getJRDD", signature(rdd = "PipelinedRDD"),
               return(rdd@env$jrdd_val)
             }
 
-            computeFunc <- function(split, part) {
-              rdd@func(split, part)
-            }
-
             packageNamesArr <- serialize(.sparkREnv[[".packages"]],
                                          connection = NULL)
 
             broadcastArr <- lapply(ls(.broadcastNames),
                                    function(name) { get(name, .broadcastNames) })
 
-            serializedFuncArr <- serialize(computeFunc, connection = NULL)
+            serializedFuncArr <- serialize(rdd@func, connection = NULL)
 
             prev_jrdd <- rdd@prev_jrdd
 
@@ -530,10 +526,7 @@ setMethod("lapplyPartitionsWithIndex",
           signature(X = "RDD", FUN = "function"),
           function(X, FUN) {
             FUN <- cleanClosure(FUN)
-            closureCapturingFunc <- function(split, part) {
-              FUN(split, part)
-            }
-            PipelinedRDD(X, closureCapturingFunc)
+            PipelinedRDD(X, FUN)
           })
 
 #' @rdname lapplyPartitionsWithIndex

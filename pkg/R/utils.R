@@ -371,14 +371,21 @@ processClosure <- function(node, oldEnv, defVars, checkedFuncs, newEnv) {
                 break
               }
               # Function has not been examined, record it and recursively clean its closure.
-              assign(nodeChar, 
-                     if (is.null(funcList[[1]])) {
-                       list(obj)
-                     } else {
-                       append(funcList, obj)
-                     },
-                     envir = checkedFuncs)
+              newFuncList <- if (is.null(funcList[[1]])) { 
+                list(obj) 
+              } else { 
+                append(funcList, obj)
+              }
+              assign(nodeChar, newFuncList, envir = checkedFuncs)
               obj <- cleanClosure(obj, checkedFuncs)
+              parent.env(environment(obj)) <- newEnv
+              # Remove examined functions.
+              newFuncList[[length(newFuncList)]] <- NULL
+              if (length(newFuncList) > 0) {
+                assign(nodeChar, newFuncList, envir = checkedFuncs)
+              } else {
+                remove(list = nodeChar, envir = checkedFuncs)
+              }
             }
             assign(nodeChar, obj, envir = newEnv)
             break
