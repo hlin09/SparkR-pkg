@@ -38,11 +38,18 @@ object RDStream {
       writeDouble(dos, time.milliseconds.toDouble)
       writeBytes(dos, rfunc)
       dos.flush()
-      Option(readObject(dis).asInstanceOf[JavaRDD[Array[Byte]]]).map(_.rdd)    
+      Option(readObject(dis).asInstanceOf[JavaRDD[Array[Byte]]]).map(_.rdd)
     } catch {
       case e: Exception =>
-//        JVMObjectTracker.callbackSocket.close()
-        System.err.println("R Callback failed with " + e)
+        try {
+          val dis = new DataInputStream(JVMObjectTracker.callbackSocket.getInputStream())
+          Option(readObject(dis).asInstanceOf[JavaRDD[Array[Byte]]]).map(_.rdd)
+        } catch {
+          case e: Exception => 
+            System.err.println("2. R Callback failed with " + e)
+            e.printStackTrace()
+        }
+        System.err.println("1. R Callback failed with " + e)
         e.printStackTrace()
         None
     }

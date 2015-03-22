@@ -8,10 +8,10 @@ ssc <- sparkR.streaming.init(sc, duration)
 
 # Data
 nums1 <- 1:10
-rdd1 <- parallelize(sc, nums1, 2L)
+rdd1 <- parallelize(sc, nums1, 1L)
 
 nums2 <- 11:20
-rdd2 <- parallelize(sc, nums2, 2L)
+rdd2 <- parallelize(sc, nums2, 1L)
 
 intPairs <- list(list(1L, -1), list(2L, 100), list(2L, 1), list(1L, 200))
 intRdd <- parallelize(sc, intPairs, 2L)
@@ -41,14 +41,14 @@ intRdd <- parallelize(sc, intPairs, 2L)
 }
 
 test_that("mapPartitionsWithIndex on DStream", {
-  inputStream <- queueStream(ssc, list(rdd1, rdd2))
-  mappedStream <- mapPartitionsWithIndex(inputStream, 
-                                         function(split, part) {
-                                           split + Reduce("+", part)
-                                         })
-  expected <- list(list(15, 41), list(39, 55))
-  actual <- .collectStream(mappedStream, 2)
-  expect_equal(actual, expected)
+#   inputStream <- queueStream(ssc, list(rdd1, rdd2))
+#   mappedStream <- mapPartitionsWithIndex(inputStream, 
+#                                          function(split, part) {
+#                                            split + Reduce("+", part)
+#                                          })
+#   expected <- list(list(55), list(155))
+#   actual <- .collectStream(mappedStream, 2)
+#   expect_equal(actual, expected)
 })
 
-sparkR.streaming.stop(ssc)
+sparkR.streaming.stop(ssc, stopSparkContext = FALSE)
