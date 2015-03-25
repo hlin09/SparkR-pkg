@@ -66,7 +66,7 @@ setMethod("initialize", "PipelinedRDD", function(.Object, prev, func, jrdd_val) 
 
   if (!inherits(prev, "PipelinedRDD") || !isPipelinable(prev)) {
     # This transformation is the first in its stage:
-    .Object@func <- func
+    .Object@func <- cleanClosure(func)
     .Object@prev_jrdd <- getJRDD(prev)
     .Object@env$prev_serializedMode <- prev@env$serializedMode
     # NOTE: We use prev_serializedMode to track the serialization mode of prev_JRDD
@@ -75,7 +75,7 @@ setMethod("initialize", "PipelinedRDD", function(.Object, prev, func, jrdd_val) 
     pipelinedFunc <- function(split, iterator) {
       func(split, prev@func(split, iterator))
     }
-    .Object@func <- pipelinedFunc
+    .Object@func <- cleanClosure(pipelinedFunc)
     .Object@prev_jrdd <- prev@prev_jrdd # maintain the pipeline
     # Get the serialization mode of the parent RDD
     .Object@env$prev_serializedMode <- prev@env$prev_serializedMode
@@ -525,7 +525,6 @@ setMethod("mapPartitions",
 setMethod("lapplyPartitionsWithIndex",
           signature(X = "RDD", FUN = "function"),
           function(X, FUN) {
-            FUN <- cleanClosure(FUN)
             PipelinedRDD(X, FUN)
           })
 

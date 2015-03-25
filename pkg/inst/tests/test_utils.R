@@ -97,14 +97,18 @@ test_that("cleanClosure on R functions", {
   expect_equal(actual, f)
   
   # Test for function (and variable) definitions.
+  z <- c(1, 2)
   f <- function(x, y) {
     privateCallRes <- unlist(joinTaggedList(x, y))  # Call package private functions.
-    g <- function(y) { y * 2 }
+    g <- function(y, z) { y * 2 }
+    z <- z * 2  # Write after read.
     g(privateCallRes)
   }
   newF <- cleanClosure(f)
   env <- environment(newF)
-  expect_equal(ls(env), "joinTaggedList")  # Only "joinTaggedList". No "y" or "g".
+  expect_equal(length(ls(env)), 2)  # Only "joinTaggedList" and "z". No "y" or "g".
+  expect_true("joinTaggedList" %in% ls(env))
+  expect_true("z" %in% ls(env))
   actual <- get("joinTaggedList", envir = env, inherits = FALSE)
   expect_equal(actual, joinTaggedList)
   env <- environment(actual)

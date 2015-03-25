@@ -41,8 +41,8 @@ $(MAVEN_TARGET_NAME): pom.xml $(SCALA_FILES) $(RESOURCE_FILES)
 	mvn -Dhadoop.version=$(SPARK_HADOOP_VERSION) -Dspark.version=$(SPARK_VERSION) -DskipTests $(MAVEN_YARN_FLAG) -Dyarn.version=$(SPARK_YARN_VERSION) clean package shade:shade
 	cp -f $(MAVEN_TARGET_NAME) ../inst/$(JAR_NAME)
 
-sharelib: string_hash_code.c
-	R CMD SHLIB -o SparkR.so string_hash_code.c
+sharelib: utils.c
+	R CMD SHLIB -o SparkR.so utils.c
 
 clean:
 	$(BUILD_TOOL) clean
