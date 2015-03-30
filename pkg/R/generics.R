@@ -1,4 +1,4 @@
-########## RDD Actions and Transformations ############
+############ RDD Actions and Transformations ############
 
 # Return the serialization mode for an RDD.
 setGeneric("getSerializedMode", function(rdd) { standardGeneric("getSerializedMode") })
