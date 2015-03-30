@@ -1,13 +1,15 @@
 # Utility functions to serialize R objects so they can be read in Java.
 
 # Type mapping from R to Java
-#  
+#
+# NULL -> Void
 # integer -> Int
 # character -> String
 # logical -> Boolean
 # double, numeric -> Double
 # raw -> Array[Byte]
-# null -> NULL
+# Date -> Date
+# POSIXct,POSIXlt -> Time
 #
 # list[T] -> Array[T], where T is one of above mentioned types
 # environment -> Map[String, T], where T is a native type
@@ -17,24 +19,36 @@ writeObject <- function(con, object, writeType = TRUE) {
   # NOTE: In R vectors have same type as objects. So we don't support
   # passing in vectors as arrays and instead require arrays to be passed
   # as lists.
-  if (is.null(object)) {
-    writeType(con, class(object))
-  } else {
-    if (writeType) {
-      writeType(con, class(object))
-    }
-    switch(class(object),
-           integer = writeInt(con, object),
-           character = writeString(con, object),
-           logical = writeBoolean(con, object),
-           double = writeDouble(con, object),
-           numeric = writeDouble(con, object),
-           raw = writeRaw(con, object),
-           list = writeList(con, object),
-           jobj = writeString(con, object$id),
-           environment = writeEnv(con, object),
-           stop(paste("Unsupported type for serialization", class(object))))
+  type <- class(object)[[1]]  # class of POSIXlt is c("POSIXlt", "POSIXt")
+  if (writeType) {
+    writeType(con, type)
   }
+  switch(type,
+         NULL = writeVoid(con),
+         integer = writeInt(con, object),
+         character = writeString(con, object),
+         logical = writeBoolean(con, object),
+         double = writeDouble(con, object),
+         numeric = writeDouble(con, object),
+         raw = writeRaw(con, object),
+         list = writeList(con, object),
+         jobj = writeJobj(con, object),
+         environment = writeEnv(con, object),
+         Date = writeDate(con, object),
+         POSIXlt = writeTime(con, object),
+         POSIXct = writeTime(con, object),
+         stop(paste("Unsupported type for serialization", type)))
+}
+
+writeVoid <- function(con) {
+  # no value for NULL
+}
+
+writeJobj <- function(con, value) {
+  if (!isValidJobj(value)) {
+    stop("invalid jobj ", value$id)
+  }
+  writeString(con, value$id)
 }
 
 writeString <- function(con, value) {
@@ -67,6 +81,7 @@ writeRaw <- function(con, batch) {
 
 writeType <- function(con, class) {
   type <- switch(class,
+                 NULL = "n",
                  integer = "i",
                  character = "c",
                  logical = "b",
@@ -76,8 +91,10 @@ writeType <- function(con, class) {
                  list = "l",
                  jobj = "j",
                  environment = "e",
-                 "NULL" = "n",
-                 stop(paste("Unsupported type for serialization:", class)))
+                 Date = "D",
+                 POSIXlt = 't',
+                 POSIXct = 't',
+                 stop(paste("Unsupported type for serialization", class)))
   writeBin(charToRaw(type), con)
 }
 
@@ -113,6 +130,14 @@ writeEnv <- function(con, env) {
     vals <- lapply(ls(env), function(x) { env[[x]] })
     writeList(con, as.list(vals))
   }
+}
+
+writeDate <- function(con, date) {
+  writeInt(con, as.integer(date))
+}
+
+writeTime <- function(con, time) {
+  writeDouble(con, as.double(time))
 }
 
 # Used to serialize in a list of objects where each

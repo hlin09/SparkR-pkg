@@ -6,6 +6,7 @@ rLibDir <- Sys.getenv("SPARKDR_RLIBDIR")
 # Load SparkR package.
 .libPaths(c(rLibDir, .libPaths()))
 suppressPackageStartupMessages(library(SparkR))
+assign(".scStartTime", 0L, SparkR:::.sparkREnv)
 
 # Waiting for backend to connect.
 callback.port <- as.integer(Sys.getenv("CALLBACK_PORT"))
