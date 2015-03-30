@@ -178,7 +178,6 @@ setValidity("RDD",
 
 ############ Actions and Transformations ############
 
-
 #' Persist an RDD
 #'
 #' Persist this RDD with the default storage level (MEMORY_ONLY).
