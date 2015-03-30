@@ -1,4 +1,4 @@
-########### RDD Actions and Transformations ############
+########## RDD Actions and Transformations ############
 
 # Return the serialization mode for an RDD.
 setGeneric("getSerializedMode", function(rdd) { standardGeneric("getSerializedMode") })
@@ -342,7 +342,3 @@ setGeneric("sortByKey", function(x,
 #' @rdname broadcast
 #' @export
 setGeneric("value", function(bcast) { standardGeneric("value") })
-
-setGeneric("mapPartitionsWithIndex", function(X, FUN) {
-  standardGeneric("mapPartitionsWithIndex") })
-#
