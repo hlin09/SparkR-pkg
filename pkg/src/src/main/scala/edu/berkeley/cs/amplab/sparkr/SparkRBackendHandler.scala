@@ -58,29 +58,22 @@ class SparkRBackendHandler(server: SparkRBackend)
           }
         case "connectCallback" =>
           println("Connecting to a callback server.")
-          JVMObjectTracker.callbackSocket = new Socket("localhost", 54321)
+          SparkRBackend.callbackSocket = new Socket("localhost", 54321)
           writeInt(dos, 0)
           writeType(dos, "void")
         case "closeCallback" =>
           // Send close to R callback server.
-          if (JVMObjectTracker.callbackSocket != null &&
-              JVMObjectTracker.callbackSocket.isConnected()) {
+          if (SparkRBackend.callbackSocket != null &&
+              SparkRBackend.callbackSocket.isConnected()) {
             try {
               println("Requesting to close a call back server.")
-              val os = new DataOutputStream(JVMObjectTracker.callbackSocket.getOutputStream())
+              val os = new DataOutputStream(SparkRBackend.callbackSocket.getOutputStream())
               writeString(os, "close")
-              JVMObjectTracker.callbackSocket.close()
+              SparkRBackend.callbackSocket.close()
             }
             writeInt(dos, 0)
             writeType(dos, "void")
           }
-        case "sendsomething" =>
-          val sos = JVMObjectTracker.callbackSocket.getOutputStream()
-          val dos2 = new DataOutputStream(sos)
-          writeString(dos2, "test")
-          dos2.flush()
-          writeInt(dos, 0)
-          writeType(dos, "void")
         case _ => dos.writeInt(-1)
       }
     } else {
@@ -196,7 +189,7 @@ class SparkRBackendHandler(server: SparkRBackend)
           case _ => parameterType
         }
       }
-      if (!parameterWrapperType.isInstance(args(i))) {
+      if (args(i) != null && !parameterWrapperType.isInstance(args(i))) {
         return false
       }
     }
@@ -218,8 +211,6 @@ object JVMObjectTracker {
   // Investiage using use atomic integer in the future.
   var objCounter: Int = 0
   
-  // Channel to callback server.
-  var callbackSocket: Socket = null
   // Streaming Context
   var streamingContext: StreamingContext = null
 

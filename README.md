@@ -1,8 +1,8 @@
-# R on Spark
+# R on Spark (With Support for R on Spark Streaming)
 
 [![Build Status](https://travis-ci.org/amplab-extras/SparkR-pkg.png?branch=master)](https://travis-ci.org/amplab-extras/SparkR-pkg)
 
-SparkR is an R package that provides a light-weight frontend to use Spark from
+This forked repository provides an R package to do Spark Streaming in R. SparkR is an R package that provides a light-weight frontend to use Spark from
 R.
 
 *NOTE: As of April 2015, SparkR has been [merged](https://github.com/apache/spark/pull/5096) into Apache Spark and is shipping in an upcoming release (1.4) due early summer 2015. This repo currently targets users using released versions of Spark. __This repo no longer accepts new pull requests, and they should now be submitted to [apache/spark](https://github.com/apache/spark); see [here](https://cwiki.apache.org/confluence/display/SPARK/Contributing+to+Spark) for some instructions.__*
@@ -108,12 +108,33 @@ Finally, to stop the cluster run
     
 sparkR.stop() can be invoked to terminate a SparkContext created previously via sparkR.init(). Then you can call sparkR.init() again to create a new SparkContext that may have different configurations.
     
+## Running SparkR Streaming
+
+After starting the SparkR with `sparkR` script or RStudio or any other your favourite R frontends, you can initialize SparkR streaming with the Spark Context `sc` and the command
+```
+ssc <-sparkR.streaming.init(sc, batchDuration = 1L)
+```
+
+to start a Streaming Context `ssc`. Then you can create DStreams and apply transformations. You can start streaming by using command
+```
+startStreaming(ssc)
+```
+
+For window and state functions, you need to give SparkR streaming a checkpoint directory before starting streaming, by using command
+```
+checkpoint(ssc, "/Users/haolin/checkpoints")
+```
+
 ## Examples, Unit tests
 
 SparkR comes with several sample programs in the `examples` directory.
 To run one of them, use `./sparkR <filename> <args>`. For example:
 
     ./sparkR examples/pi.R local[2]
+
+To run SparkR Streaming wordcount example:
+
+    ./sparkR examples/streaming/hdfs_wordcount.R /home/haolin/rstreaming/
 
 You can also run the unit-tests for SparkR by running (you need to install the [testthat](http://cran.r-project.org/web/packages/testthat/index.html) package first):
 

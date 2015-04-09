@@ -30,4 +30,5 @@ Collate:
     'sparkRBackend.R'
     'sparkRClient.R'
     'utils.R'
+    'streaming-utils.R'
     'zzz.R'

@@ -102,14 +102,14 @@ PipelinedRDD <- function(prev, func) {
 }
 
 # For normal RDDs we can directly read the serializedMode
-setMethod("getSerializedMode", signature(rdd = "RDD"), function(rdd) rdd@env$serializedMode )
+setMethod("getSerializedMode", signature(x = "RDD"), function(x) x@env$serializedMode )
 # For pipelined RDDs if jrdd_val is set then serializedMode should exist
 # if not we return the defaultSerialization mode of "byte" as we don't know the serialization
 # mode at this point in time.
-setMethod("getSerializedMode", signature(rdd = "PipelinedRDD"),
-          function(rdd) {
-            if (!is.null(rdd@env$jrdd_val)) {
-              return(rdd@env$serializedMode)
+setMethod("getSerializedMode", signature(x = "PipelinedRDD"),
+          function(x) {
+            if (!is.null(x@env$jrdd_val)) {
+              return(x@env$serializedMode)
             } else {
               return("byte")
             }
@@ -997,7 +997,7 @@ setMethod("coalesce",
 #' Save this RDD as a SequenceFile of serialized objects.
 #'
 #' @param x The RDD to save
-#' @param path The directory where the file is saved
+#' @param path A character vector of directory where the file is saved.
 #' @seealso objectFile
 #' @examples
 #'\dontrun{
@@ -1008,7 +1008,7 @@ setMethod("coalesce",
 #' @rdname saveAsObjectFile
 #' @aliases saveAsObjectFile,RDD
 setMethod("saveAsObjectFile",
-          signature(x = "RDD", path = "character"),
+          signature(x = "RDD"),
           function(x, path) {
             # If serializedMode == "string" we need to serialize the data before saving it since
             # objectFile() assumes serializedMode == "byte".
@@ -1032,7 +1032,7 @@ setMethod("saveAsObjectFile",
 #' @rdname saveAsTextFile
 #' @aliases saveAsTextFile,RDD
 setMethod("saveAsTextFile",
-          signature(x = "RDD", path = "character"),
+          signature(x = "RDD"),
           function(x, path) {
             func <- function(str) {
               toString(str)

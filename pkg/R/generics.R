@@ -1,7 +1,7 @@
 ############ RDD Actions and Transformations ############
 
-# Return the serialization mode for an RDD.
-setGeneric("getSerializedMode", function(rdd) { standardGeneric("getSerializedMode") })
+# Return the serialization mode.
+setGeneric("getSerializedMode", function(x) { standardGeneric("getSerializedMode") })
 
 # The jrdd accessor function.
 setGeneric("getJRDD", function(rdd, ...) { standardGeneric("getJRDD") })
@@ -20,7 +20,7 @@ setGeneric("unpersist", function(x) { standardGeneric("unpersist") })
 
 #' @rdname checkpoint-methods
 #' @export
-setGeneric("checkpoint", function(x) { standardGeneric("checkpoint") })
+setGeneric("checkpoint", function(x, ...) { standardGeneric("checkpoint") })
 
 #' @rdname numPartitions
 #' @export
@@ -154,11 +154,11 @@ setGeneric("coalesce", function(x, numPartitions, ...) { standardGeneric("coales
 #' @rdname saveAsObjectFile
 #' @seealso objectFile
 #' @export
-setGeneric("saveAsObjectFile", function(x, path) { standardGeneric("saveAsObjectFile") })
+setGeneric("saveAsObjectFile", function(x, ...) { standardGeneric("saveAsObjectFile") })
 
 #' @rdname saveAsTextFile
 #' @export
-setGeneric("saveAsTextFile", function(x, path) { standardGeneric("saveAsTextFile") })
+setGeneric("saveAsTextFile", function(x, ...) { standardGeneric("saveAsTextFile") })
 
 #' @rdname sortBy
 #' @export
@@ -369,3 +369,66 @@ setGeneric("subtract",
 #' @rdname broadcast
 #' @export
 setGeneric("value", function(bcast) { standardGeneric("value") })
+
+###################### Streaming Methods ##########################
+
+
+# The jdstream accessor function.
+setGeneric("getJDStream", function(dstream, ...) { standardGeneric("getJDStream") })
+
+#' @rdname transformWith
+#' @export
+setGeneric("transformWith", function(x, func, other) { standardGeneric("transformWith") })
+
+#' @rdname slice
+#' @export
+setGeneric("slice", function(x, begin, end) { standardGeneric("slice") })
+
+#' @rdname windowDStream
+#' @export
+setGeneric("windowDStream", 
+           function(x, windowDuration, slideDuration) { standardGeneric("windowDStream") })
+
+#' @rdname window-method
+#' @export
+setGeneric("reduceByWindow", 
+           function(x, reduceFunc, invReduceFunc, windowDuration, slideDuration = NULL) { 
+             standardGeneric("reduceByWindow") 
+           })
+
+#' @rdname window-method
+#' @export
+setGeneric("countByWindow", 
+           function(x, windowDuration, slideDuration = NULL) { 
+             standardGeneric("countByWindow") 
+           })
+
+#' @rdname window-method
+#' @export
+setGeneric("countByValueAndWindow", 
+           function(x, windowDuration, slideDuration = NULL, numPartitions = 1L) { 
+             standardGeneric("countByValueAndWindow") 
+           })
+
+#' @rdname window-method
+#' @export
+setGeneric("groupByKeyAndWindow", 
+           function(x, windowDuration, slideDuration = NULL, numPartitions = 1L) { 
+             standardGeneric("groupByKeyAndWindow") 
+           })
+
+#' @rdname window-method
+#' @export
+setGeneric("reduceByKeyAndWindow", 
+           function(x, reduceFunc, invReduceFunc, windowDuration, slideDuration = NULL, 
+                    numPartitions = 1L, filterFunc = NULL) { 
+             standardGeneric("reduceByKeyAndWindow") 
+           })
+
+#' @rdname updateStateByKey
+#' @export
+setGeneric("updateStateByKey", 
+           function(x, updateFunc, numPartitions = 1L) { 
+             standardGeneric("updateStateByKey") 
+           })
+

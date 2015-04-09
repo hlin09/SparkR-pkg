@@ -2,29 +2,27 @@ library(SparkR)
 
 args <- commandArgs(trailing = TRUE)
 
-if (length(args) != 2) {
-  print("Usage: wordcount <master> <file>")
+if (length(args) != 1) {
+  print("Usage: wordcount <directory>")
   q("no")
 }
 
 # Initialize Spark context
-sc <- sparkR.init(args[[1]], "RStreamingHDFSWordCount")
+sc <- sparkR.init(appName = "RStreamingHDFSWordCount")
 ssc <- sparkR.streaming.init(sc, 1)
-lines <- textFileStream(ssc, args[[2]])
+lines <- textFileStream(ssc, args[[1]])
 
 words <- flatMap(lines,
                  function(line) {
                    strsplit(line, " ")[[1]]
                  })
-wordCount <- lapply(words, function(word) { list(word, 1L) })
+wordCount <- map(words, function(word) { list(word, 1L) })
 
 counts <- reduceByKey(wordCount, "+", 2L)
-output <- collect(counts)
+print(map(counts, function(wordcount) { 
+  paste(wordcount[[1]], ": ", wordcount[[2]], "\n", sep = "") 
+}))
 
-for (wordcount in output) {
-  cat(wordcount[[1]], ": ", wordcount[[2]], "\n")
-}
-
-startStream(ssc)
+startStreaming(ssc)
 awaitTermination(ssc)
 

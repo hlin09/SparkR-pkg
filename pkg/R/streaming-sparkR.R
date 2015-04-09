@@ -1,8 +1,15 @@
+#' Initialize a new Spark Streaming Context.
+#'
+#' This function initializes a new StreamingContext.
+#'
+#' @param sc The Spark Context.
+#' @param batchDuration Time interval in sec after which the DStream generates a RDD.
+#' @export
 sparkR.streaming.init <- function(sc, batchDuration) {
   if (exists(".sparkRjssc", envir = .sparkREnv)) {
-    cat("Re-using existing Spark Streaming Context. \
-        Please stop SparkR with sparkR.stop() or restart R to create \
-        a new Spark Streaming Context\n")
+    cat("Re-using existing Spark Streaming Context.",
+        "Please stop SparkR streaming with sparkR.streaming.stop() or restart",
+        "R to create a new Spark Streaming Context\n")
     return(get(".sparkRjssc", envir = .sparkREnv))
   }
   
@@ -34,10 +41,14 @@ sparkR.streaming.init <- function(sc, batchDuration) {
 # Also terminates the callback server that the JVM backend is connected to.
 sparkR.streaming.stop <- function(ssc, stopSparkContext = TRUE, 
                                   stopGracefully = FALSE) {
-  callJMethod(ssc, "stop", stopSparkContext, stopGracefully)
-  if (stopSparkContext) {
-    SparkR::sparkR.stop()
-  } else {
-    callJStatic("SparkRHandler", "closeCallback")
+  if (isValidJobj(ssc)) {
+    callJMethod(ssc, "stop", stopSparkContext, stopGracefully)
+    
+    if (stopSparkContext) {
+      SparkR::sparkR.stop()
+      rm(".sparkRjssc", envir = .sparkREnv)
+      # Clear jobj maps
+      clearJobjs()
+    }
   }
 }

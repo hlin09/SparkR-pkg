@@ -77,13 +77,13 @@ class SparkRBackend {
     bootstrap = null
     
     // Send close to R callback server.
-    if (JVMObjectTracker.callbackSocket != null && 
-        !JVMObjectTracker.callbackSocket.isClosed()) {
+    if (SparkRBackend.callbackSocket != null && 
+        !SparkRBackend.callbackSocket.isClosed()) {
       try {
         println("Requesting to close a call back server.")
-        val dos = new DataOutputStream(JVMObjectTracker.callbackSocket.getOutputStream())
+        val dos = new DataOutputStream(SparkRBackend.callbackSocket.getOutputStream())
         writeString(dos, "close")
-        JVMObjectTracker.callbackSocket.close()
+        SparkRBackend.callbackSocket.close()
       }
     }
   }
@@ -91,6 +91,10 @@ class SparkRBackend {
 }
 
 object SparkRBackend {
+  
+  // Channel to callback server.
+  var callbackSocket: Socket = null
+
   def main(args: Array[String]) {
     if (args.length < 1) {
       System.err.println("Usage: SparkRBackend <tempFilePath>")
